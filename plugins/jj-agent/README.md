@@ -45,6 +45,24 @@ Requirements:
 - `jj` on `PATH`.
 - Nothing else: the hooks parse their input with bash builtins (no jq). They run under `/bin/bash` when it exists, otherwise the `bash` on `PATH`.
 
+## Using it in an existing git repo
+
+Turn the repo into a colocated jj repo; that is the only opt-in step:
+
+```bash
+cd /path/to/repo
+jj git init
+jj bookmark track main@origin   # for each remote branch you pull, if jj suggests it
+```
+
+- `.git` stays as it is and `.jj` is added next to it (git ignores it). Branches become bookmarks, the checked-out branch becomes the parent of the working-copy change `@`, and uncommitted changes carry over into `@`.
+- Claude Code (plugin installed at user scope) picks the repo up without a restart: at the next prompt or tool call it tells the agent the repo is now jj.
+- Codex needs the package in each repo: `apm install /path/to/jj-agent-marketplace/plugins/jj-agent`. It writes `.codex/`, `.agents/skills/`, `apm.yml` and `apm.lock.yaml` into the repo; commit or ignore them. Trust the hooks with `/hooks` in Codex.
+- You keep using git, your IDE and `gh` as before; only the agent's git is guarded. jj keeps git's HEAD detached at `@-`, so `git status` may show a detached HEAD. jj imports whatever you do with git at its next command.
+- To go back to plain git, delete `.jj`. Commits you made only through jj and never put on a bookmark do not become git branches, so set a bookmark on any you want to keep first.
+
+Without `.jj` (plain git repos and other directories) every hook exits silently, writes nothing, and the shim passes every git command straight through. The check walks up from the working directory, so a git repo nested inside a jj working copy counts as part of that jj repo.
+
 ## Notes
 
 - **Codex:** project hooks run only after the project's `.codex/` layer is trusted and the hooks are reviewed with `/hooks`. APM writes repo-relative hook paths (`.codex/hooks/...`), so start Codex from the repo root.
@@ -53,7 +71,7 @@ Requirements:
 - **The shim affects only Claude Code's Bash tool.** Your terminal is untouched.
 - **What the shim cannot see:** git called by absolute path (`/usr/bin/git`), scripts that reset `PATH`, libgit2-based tools, and git MCP servers. The snapshots and the git-change report cover what slips through.
 - **Conflict markers:** the skill's preflight runs `jj config set --repo ui.conflict-marker-style git`. This changes how conflicts look in that repo for humans too.
-- **Latency:** a Bash command in a jj repo costs two jj processes: about 45 ms in a small repo and 90 ms at 30,000 files on macOS. The post-command snapshot grows with the number of files in the working copy. Turning on watchman (`fsmonitor.backend = "watchman"` in jj 0.46) made snapshots slower in our measurement, so it is not recommended here. Measure with `tests/hooks-bench.sh` and `tests/hooks-profile.sh`.
+- **Latency:** a Bash command in a jj repo costs two jj processes: about 45 ms in a small repo and 90 ms at 30,000 files on macOS. The post-command snapshot grows with the number of files in the working copy. Turning on watchman (`fsmonitor.backend = "watchman"` in jj 0.46) made snapshots slower in our measurement, so it is not recommended here. Measure with `tests/hooks-bench.sh` and `tests/hooks-profile.sh`; recorded numbers and environment are in [BENCHMARK.md](../../BENCHMARK.md).
 
 ## Development
 
