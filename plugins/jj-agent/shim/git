@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# git shim for Claude Code sessions (put first on PATH by scripts/session-start.sh).
+# Outside a jj repo: transparent. Inside a jj repo:
+#   - calls made by jj itself (jj git fetch/push spawn git) → pass through
+#   - read-only git (rev-parse, ls-files, log, ...) → pass through, so helper scripts keep working
+#   - anything that changes refs, index or working copy → blocked with a jj hint
+# bash 3.2 compatible (macOS /bin/bash).
+
+shim_dir=$(cd "$(dirname "$0")" && pwd -P)
+
+real_git() {
+  local IFS=: d
+  for d in $PATH; do
+    [ -n "$d" ] || continue
+    [ "$(cd "$d" 2>/dev/null && pwd -P)" = "$shim_dir" ] && continue
+    if [ -x "$d/git" ]; then exec "$d/git" "$@"; fi
+  done
+  echo "git shim: real git not found on PATH" >&2
+  exit 127
+}
+
+# Escape hatch for humans/scripts that really need it.
+[ -n "$JJ_SHIM_OFF" ] && real_git "$@"
+
+# Find the subcommand, skipping git's global options; honour -C <dir>.
+dir=$PWD sub='' i=0 args=("$@")
+while [ $i -lt ${#args[@]} ]; do
+  a=${args[$i]}
+  case "$a" in
+    -C) i=$((i+1)); case "${args[$i]}" in /*) dir=${args[$i]};; *) dir=$dir/${args[$i]};; esac ;;
+    -c|--git-dir|--work-tree|--namespace|--exec-path|--config-env) i=$((i+1)) ;;
+    -*) ;;
+    *) sub=$a; break ;;
+  esac
+  i=$((i+1))
+done
+rest=("${args[@]:$((i+1))}")
+
+# Inside a jj repo? (walk up looking for .jj — no jj process needed)
+d=$(cd "$dir" 2>/dev/null && pwd -P) || real_git "$@"
+while [ "$d" != "/" ] && [ ! -d "$d/.jj" ]; do d=$(dirname "$d"); done
+[ -d "$d/.jj" ] || real_git "$@"
+
+# Called by jj itself (jj git fetch/push spawn git) → allow.
+parent=$(ps -o comm= -p "$PPID" 2>/dev/null)
+[ "$(basename "${parent:-x}")" = "jj" ] && real_git "$@"
+# Fallback when ps is unavailable (e.g. sandboxed): jj always calls git as
+#   git -c core.fsmonitor=false -c submodule.recurse=false --git-dir <dir> <fetch|push|...>
+case " $* " in *" core.fsmonitor=false "*" --git-dir "*) real_git "$@" ;; esac
+
+# Read-only subcommands: always fine.
+case "$sub" in
+  ""|help|version|rev-parse|rev-list|ls-files|ls-tree|ls-remote|cat-file|show-ref|for-each-ref|\
+  merge-base|name-rev|describe|check-ignore|check-attr|blame|annotate|grep|shortlog|\
+  config|var|whatchanged|diff-tree|diff-files|diff-index|count-objects|verify-commit|archive)
+    real_git "$@" ;;
+  status|log|show|diff)
+    echo "[jj repo] git $sub works but can mislead here; prefer: jj st / jj log / jj show / jj diff" >&2
+    real_git "$@" ;;
+  remote|worktree|stash)
+    # listing forms only: decided by the first argument
+    case "$sub:${rest[0]}" in
+      remote:|remote:-v|remote:--verbose|remote:show|remote:get-url|worktree:list|stash:list|stash:show)
+        real_git "$@" ;;
+    esac ;;
+  branch|tag)
+    # listing forms only: no args, or a list flag and no flag that writes
+    list=0 write=0
+    [ ${#rest[@]} -eq 0 ] && list=1
+    for a in "${rest[@]}"; do
+      case "$sub:$a" in
+        *:-l|*:--list|*:--contains*|*:--merged*|*:--no-merged*|*:--points-at*|branch:--show-current|branch:-a|branch:--all|branch:-r|branch:--remotes|branch:-v|branch:-vv|tag:-n*) list=1 ;;
+        *:-d|*:-D|*:--delete|*:-f|*:--force|*:-m|*:-M|*:--move|*:-c|*:-C|*:--copy|*:-u|*:--set-upstream-to*|*:--unset-upstream|tag:-a|tag:-s|tag:--annotate|tag:--sign) write=1 ;;
+      esac
+    done
+    [ $list = 1 ] && [ $write = 0 ] && real_git "$@" ;;
+esac
+
+cat >&2 <<'EOF'
+Blocked: this is a jj (Jujutsu) repo; git commands that change state are disabled here.
+Use jj instead (see the jj skill):
+  git add/commit    -> jj commit -m "msg"        git commit --amend -> jj squash -u
+  git checkout X    -> jj new X                  git stash          -> not needed (jj new)
+  git rebase        -> jj rebase -o <dest>       git reset --hard   -> jj restore / jj abandon
+  git pull/fetch    -> jj git fetch              git push           -> jj git push -b <bookmark>
+  git branch X      -> jj bookmark create X -r <rev>
+If a jj flag fails, run: jj <command> --help. Do not work around this block.
+EOF
+exit 1

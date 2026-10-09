@@ -1,0 +1,12 @@
+{
+  "name": "yejun-jj",
+  "description": "Jujutsu (jj) support for coding agents",
+  "owner": { "name": "Yejun" },
+  "plugins": [
+    {
+      "name": "jj-agent",
+      "source": "./plugins/jj-agent",
+      "description": "Make coding agents use Jujutsu (jj) instead of git: workflow skill, git guard, and per-step snapshots"
+    }
+  ]
+}
