@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # PreToolUse (Bash)
 # Only acts inside jj repos; elsewhere it exits after a directory walk.
-# Snapshot right before the command, so `jj op log` holds the state it started from, and record a
-# baseline (operation id and a copy of the git index) for post-tool.sh to detect git changes the
-# command makes.
+# Record a baseline (the latest operation and a copy of the git index) for post-tool.sh to detect git
+# changes the command makes. No snapshot here: the previous tool call's PostToolUse and this turn's
+# UserPromptSubmit already took one, so the latest operation is the state the command starts from
+# (only edits made by others in the middle of a turn are missed). Skipping it saves a working-copy
+# scan, which grows with the number of files.
 # Never blocks or rewrites the command: Codex has no way to put the git shim on PATH, so detection
 # after the fact is the guard there (and a backstop behind the shim in Claude Code).
 . "${BASH_SOURCE%/*}/lib.sh"
@@ -17,8 +19,7 @@ command -v jj >/dev/null 2>&1 || exit 0
 json_get session_id SESSION_ID
 json_get tool_use_id id
 baseline_path "$id"
-# One jj process: `jj op log` snapshots the working copy first, then prints the new head operation.
-op=$(jj -R "$root" op log --no-graph -n 1 -T id 2>/dev/null)
+op=$(jj -R "$root" op log --ignore-working-copy --no-graph -n 1 -T id 2>/dev/null)
 [ -n "$op" ] || exit 0
 [ -d "${BF%/*}" ] || mkdir -p "${BF%/*}" 2>/dev/null
 save_index "$root" "$BF.index" || rm -f "$BF.index"

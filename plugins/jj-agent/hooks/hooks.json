@@ -17,7 +17,7 @@
           {
             "type": "command",
             "command": "if [ -x /bin/bash ]; then /bin/bash \"${CLAUDE_PLUGIN_ROOT}/scripts/user-prompt.sh\"; else bash \"${CLAUDE_PLUGIN_ROOT}/scripts/user-prompt.sh\"; fi",
-            "timeout": 10
+            "timeout": 30
           }
         ]
       }

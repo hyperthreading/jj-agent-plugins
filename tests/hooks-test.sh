@@ -61,6 +61,12 @@ call() { # command [tool_name] [post_event]
   OUT=$(printf '%s' "$out" | sed -n 's/.*"additionalContext":"\(.*\)"}}$/\1/p')
 }
 
+# The user edits files between turns; UserPromptSubmit runs when they send the next prompt.
+user_turn() { # shell snippet run in $repo
+  (cd "$repo" && eval "$1") >/dev/null 2>&1
+  hook_input UserPromptSubmit "$repo" x x x | PATH=$hook_path $HB "$P/user-prompt.sh" >/dev/null
+}
+
 reason() { printf '%s' "$OUT" | sed -n 's/.*jj-agent: during the last command in [^,]*, \(.*\)\. The repo state.*/\1/p'; }
 
 expect() { # name expected-reason ('' = no report)
@@ -88,7 +94,7 @@ run_suite() { # label hook-PATH
   call "echo x >> f";                                   expect "plain edit" ""
   call "git add -A && git commit -qm viagit";           expect "git commit" "git moved HEAD or refs"
   call "echo y >> f && git checkout -- f";              expect "command discards its own edit (by design)" ""
-  echo z >> "$repo/f"
+  user_turn "echo z >> f"
   call "./reset-f.sh";                                  expect "git checkout -- inside a script" "git rewrote these files: f"
   op=$(printf '%s' "$OUT" | sed -n 's/.*jj op restore \([0-9a-f]*\).*/\1/p')
   (cd "$repo" && jj restore --from "at_operation($op, @)" f >/dev/null 2>&1)
@@ -96,21 +102,23 @@ run_suite() { # label hook-PATH
   call "echo w >> g && jj commit -m c2";                expect "jj commit" ""
   call "echo v >> g; git status; git diff; git describe --always --dirty"
   expect "edit + read-only git right after jj commit (stat refresh)" ""
-  touch "$repo/junk"
+  user_turn "touch junk"
   call "git clean -fdq";                                expect "git clean -fd keeps files jj tracks" ""
   [ -f "$repo/junk" ] && ok "git clean -fd left the snapshotted file" || bad "git clean -fd left the snapshotted file" "junk was deleted"
-  echo u >> "$repo/f"
+  user_turn "echo u >> f"
   call "jj commit -m c3 && echo t >> f && ./reset-f.sh"; expect "jj commit + script git (nothing from before is lost)" ""
-  echo p >> "$repo/f"
+  user_turn "echo p >> f"
   call "jj describe -m d && git checkout -- f";         expect "jj op + git checkout in one command" "git rewrote these files: f"
-  echo r >> "$repo/g"
+  user_turn "echo r >> g"
   call "git stash -q";                                  expect "git stash" "git rewrote these files: g"
-  echo s >> "$repo/h"
+  user_turn "echo s >> h"
   call "jj restore h && git status";                    expect "jj restore + git status (known false positive)" "git rewrote these files: h"
   call "echo q >> g" apply_patch;                       expect "Codex apply_patch (no PreToolUse)" ""
-  echo k >> "$repo/f"
+  user_turn "echo k >> f"
   call "./reset-f.sh; false" Bash PostToolUseFailure;   expect "failed command (PostToolUseFailure)" "git rewrote these files: f"
   case $RAW in *'"hookEventName":"PostToolUseFailure"'*) ok "failure report uses the PostToolUseFailure event name" ;; *) bad "failure report uses the PostToolUseFailure event name" "got [$RAW]" ;; esac
+  echo m >> "$repo/f"   # someone else edits in the middle of a turn: no UserPromptSubmit
+  call "./reset-f.sh";                                  expect "edit by someone else mid-turn (known gap: not protected)" ""
 
   r=$(ls "$CLAUDE_PLUGIN_DATA/baselines" 2>/dev/null | wc -l | tr -d ' ')
   [ "$r" = 0 ] && ok "no baselines left behind" || bad "no baselines left behind" "$r left"

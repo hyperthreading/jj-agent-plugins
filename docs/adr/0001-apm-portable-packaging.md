@@ -66,7 +66,7 @@ jj-agent-marketplace/
 **감지는 Bash 명령 앞뒤에서 기준점을 비교하는 방식으로 한다.**
 
 1. **PreToolUse(`Bash`), `pre-tool.sh`:** jj repo 안에서만 동작한다.
-   - `jj op log -n1`을 실행한다. 이 명령은 snapshot을 먼저 하고 그 결과 op id를 출력하므로 jj 프로세스 하나로 끝난다.
+   - `jj op log --ignore-working-copy -n1`로 마지막 op id만 읽는다. snapshot은 하지 않는다(아래 "명령 시작 상태" 참고).
    - op id와 `.git/index` 사본을 tool call별(`tool_use_id`) baseline으로 남긴다. 사본은 APFS에서 `cp -c`(clone), Linux에서 `cp --reflink=auto`로 만들어서 비용을 줄인다.
    - 차단하거나 명령을 고쳐 쓰지는 않는다.
 2. **PostToolUse(`Bash`), `post-tool.sh`:** Claude Code는 exit code가 0이 아닌 명령에 PostToolUse 대신 PostToolUseFailure를 보내므로, 같은 스크립트를 두 이벤트에 건다. Codex는 실패한 명령에도 PostToolUse를 보내고, 모르는 이벤트 이름(`PostToolUseFailure`)은 무시한다(실험으로 확인). 어떤 jj 명령보다 **먼저** `.git/index`를 사본과 비교(`cmp`)한다. 다르면 현재 index도 복제해 둔다. jj가 HEAD 변경을 import하면서 index를 다시 쓰기 때문이다. 그다음 `jj op log -n50`으로 snapshot과 op 목록 읽기를 한 번에 하고 판정한다.
@@ -98,42 +98,41 @@ jj-agent-marketplace/
 - `git checkout -- f`, `git stash`는 op 설명으로는 평소 편집(`snapshot working copy`)과 구분되지 않는다.
 - jj가 쓴 index entry는 stat이 0이다(`git ls-files --debug`의 `mtime: 0:0`). `git status`/`diff`는 그런 entry 가운데 내용이 같은 것의 stat을 채워 index 내용을 바꾼다. 처음 구현은 "index 내용 hash가 바뀌었고 그 사이에 jj op가 없으면 git"으로 판정했는데, `jj commit` 직후 `echo z >> f; git status`에서 오탐이 났다. 그래서 path 단위 교집합으로 바꿨다.
 
-**pre snapshot을 추가해서 얻는 것:**
-- 복구 지점이 정확히 "이 명령 직전"이 된다.
-- 사용자가 turn 사이에 직접 편집한 내용도 복구 지점에 포함된다.
-- 그 사이의 op가 모두 이 명령 때문에 생긴 것이 되므로, 어떤 명령이 원인인지 정확히 특정할 수 있다.
-- 신호 2의 B(명령 직전 tree)를 정확히 구할 수 있다.
+**명령 시작 상태:** pre에서는 snapshot을 하지 않는다. 직전 tool call의 PostToolUse가 이미 snapshot했으므로, 마지막 op가 곧 명령이 시작되는 상태다. 사용자가 turn 사이에 편집기나 자기 터미널에서 바꾼 것은 UserPromptSubmit hook이 snapshot한다. 그래서 그 변경은 복구 지점에 들어가고, 이번 명령이 한 일로 잘못 알리지도 않는다. 처음에는 pre에서도 snapshot했지만, 30,000 파일 repo에서 hook 하나에 약 36ms가 더 들어서 뺐다.
 
-**보호 범위:** 보호 대상은 명령이 시작되기 전의 상태다. 이 상태는 pre snapshot이 보장한다. 같은 명령 안에서 만든 변경을 그 명령이 다시 버리는 경우(예: `sed -i … f && git checkout -- f`)는 보호 대상이 아니다. 그건 명령 자체의 의도다. git은 커밋되지 않은 변경을 명시적인 폐기 명령(`checkout --`, `restore`, `reset --hard`, `stash`, `clean`)으로만 덮어쓰고, jj로 같은 명령을 짜도 결과는 같다.
+빈틈은 turn이 진행되는 도중에 다른 사람이나 프로세스가 같은 repo를 바꾸는 경우다. 그 변경은 명령 시작 상태에 없으므로, git이 그것을 덮어써도 알리지 못하고 복구할 수도 없다. 그 사이에 사용자가 터미널에서 git으로 HEAD를 옮겼다면 이번 명령이 한 것으로 알린다.
+
+**보호 범위:** 보호 대상은 명령이 시작되기 전의 상태다. 같은 명령 안에서 만든 변경을 그 명령이 다시 버리는 경우(예: `sed -i … f && git checkout -- f`)는 보호 대상이 아니다. 그건 명령 자체의 의도다. git은 커밋되지 않은 변경을 명시적인 폐기 명령(`checkout --`, `restore`, `reset --hard`, `stash`, `clean`)으로만 덮어쓰고, jj로 같은 명령을 짜도 결과는 같다.
 
 **남는 한계:**
 - **오탐:** 같은 명령 안에서 파일을 git이 아닌 방법(`sed`, `jj restore`, `jj abandon` 등)으로 index 내용(`@-`)으로 되돌리고, 그 뒤에 git이 그 파일을 읽으면 A∩B에 들어간다. 이 경우 알림만 나가고 아무것도 되돌리지 않는다. 알림에 path 목록과 "직접 되돌렸다면 무시하라"는 안내가 있어서 agent가 판단할 수 있다.
-- **비용:** Bash 호출마다 jj repo 안에서 jj 프로세스 2개(pre와 post에 하나씩)와 index 사본이 든다. clone을 지원하지 않는 filesystem에서는 실제로 복사한다. hook은 `/bin/bash`가 있으면 그것으로 실행한다(없으면 PATH의 `bash`). 입력 파싱과 jj repo 탐색은 bash 내장 기능만 써서 jq나 `dirname` 프로세스를 띄우지 않는다.
+- **비용:** jj repo 안의 Bash 호출 1회에 jj 프로세스 2개(pre는 snapshot 없는 op 조회, post는 snapshot 포함)와 index 사본이 든다. clone을 지원하지 않는 filesystem에서는 실제로 복사한다. hook은 `/bin/bash`가 있으면 그것으로 실행한다(없으면 PATH의 `bash`). 입력 파싱과 jj repo 탐색은 bash 내장 기능만 써서 jq나 `dirname` 프로세스를 띄우지 않는다.
 - **측정** (`tests/hooks-bench.sh`, `tests/hooks-profile.sh`, macOS, jj 0.46, median ms, git shim 없는 PATH). Bash 호출 1회 기준이고, 괄호 안은 최적화 전 값이다.
 
   | repo | pre | post | post+git | post(edit) |
   |---|---|---|---|---|
   | jj repo 아님 | 3 (46) | 3 (96) | – | – |
-  | 10 files | 26 (91) | 29 (110) | 64 | 52 |
-  | 5,000 files | 35 (99) | 39 (118) | 72 | 62 |
-  | 30,000 files | 64 (131) | 72 (150) | 97 | 102 |
+  | 10 files | 20 (91) | 25 (110) | 42 | 51 |
+  | 5,000 files | 21 (99) | 35 (118) | 49 | 62 |
+  | 30,000 files | 21 (131) | 70 (150) | 72 | 98 |
 
   단계별 비용(10 files / 30,000 files):
 
   | 단계 | hook | ms |
   |---|---|---|
-  | `/bin/bash` 시작 | 둘 다 | 1.5 / 1.7 |
-  | lib.sh 로드, 입력 파싱, jj repo 탐색 | 둘 다 | 1.1 / 1.2 |
-  | `jj op log -n1` (snapshot 포함) | pre | 19 / 53 |
+  | `/bin/bash` 시작 | 둘 다 | 2 / 3 |
+  | lib.sh 로드, 입력 파싱, jj repo 탐색 | 둘 다 | 1 / 1 이하 |
+  | `jj op log --ignore-working-copy -n1` | pre | 16 / 15 |
   | index 사본 (`cp -c`) | pre | 2 / 2 |
-  | `cmp` index | post | 2 / 6 |
-  | `jj op log -n50` (snapshot 포함) | post | 20 / 53 |
-  | baseline 파일 삭제 | post | 3 / 3 |
-  | index가 바뀌었을 때: 사본 + `jj diff` | post | 22 / 22 |
-  | 내용이 바뀐 파일도 있을 때: `ls-files` ×2 | post | 54 / 54 |
+  | `cmp` index | post | 2 / 5 |
+  | `jj op log -n50` (snapshot 포함) | post | 16 / 52 |
+  | baseline 파일 삭제 | post | 2 / 2 |
+  | index가 바뀌었을 때: 사본 + `jj diff` | post | 17 / 16 |
+  | 내용이 바뀐 파일도 있을 때: `ls-files` ×2 | post | 11 / 12 |
 
-  - 작은 repo에서는 Bash 호출 1회에 약 55ms가 든다. 남은 비용은 대부분 jj 프로세스 2개다.
-  - 큰 repo에서는 snapshot 비용이 파일 수에 비례해서 30,000 파일이면 약 136ms다. watchman(`core.fsmonitor`)으로 줄여야 한다.
+  - Bash 호출 1회에 작은 repo는 약 45ms, 30,000 파일 repo는 약 90ms가 든다. 남은 비용은 대부분 jj 프로세스 2개와, 파일 수에 비례하는 post snapshot이다.
+  - snapshot 비용은 history나 용량이 아니라 working copy의 파일 수에 따라 달라진다. jj는 모든 파일의 stat을 확인하고 `tree_state`(30,000 파일에서 777KB)를 읽고 쓴다. 파일이 실제로 바뀐 snapshot은 약 50ms가 더 든다.
+  - watchman(jj 0.46의 키는 `fsmonitor.backend = "watchman"`)을 켜면 30,000 파일 repo에서 snapshot이 57ms에서 158ms로 오히려 느려졌다. 그래서 권장하지 않는다. 원인은 확인하지 못했다(테스트 repo가 `/private/tmp` 아래였다).
   - 최적화 전에는 고정 비용이 컸다. PATH의 MacPorts bash가 시작에만 15ms(`/bin/bash`는 3ms), jq를 필드마다 띄우는 데 약 10ms씩, `dirname` 루프, hook마다 jj 프로세스 2개가 들었다.
 - `git clean`: jj가 snapshot한 파일은 git index에 내용 없는 entry로 올라가 있다. 그래서 `git clean -fd`는 이 파일들을 지우지 않는다(구현 중 실험으로 확인했다). 지워지는 것은 snapshot 뒤 같은 명령 안에서 새로 만든 파일, 그리고 `-x`로 지정한 ignored 파일뿐이다. 앞의 것은 명령의 의도이고, 뒤의 것은 jj도 추적하지 않는다.
 - `jj op restore`는 그 명령이 한 정상적인 변경도 함께 되돌린다. 그래서 agent에게 먼저 확인하라고 안내한다.

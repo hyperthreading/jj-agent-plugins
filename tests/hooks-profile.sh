@@ -78,7 +78,7 @@ done
 measure_vals "$HB -c :"; INTERP=("${VALS[@]}")
 row "interpreter start ($HB)" both "${INTERP[@]}"
 measure "lib.sh + read input + parse + find root"    both  "$HB -c '. \"$P/lib.sh\"; read_input; json_get cwd c; json_get session_id s; json_get tool_use_id i; json_get file_path f; find_jj_root \"\$c\"' < '@R@.json'" INTERP
-measure "jj op log -n1 (snapshot + head op)"         pre   "jj -R '@R@' op log --no-graph -n 1 -T id >/dev/null"
+measure "jj op log -n1 --ignore-working-copy"         pre   "jj -R '@R@' op log --ignore-working-copy --no-graph -n 1 -T id >/dev/null"
 measure "copy git index (cp -c / reflink)"           pre   "cp -c '@R@/.git/index' '@R@.copy' 2>/dev/null || cp '@R@/.git/index' '@R@.copy'"
 measure "cmp index vs copy"                          post  "cmp -s '@R@.index' '@R@/.git/index'"
 measure "jj op log -n50 (snapshot + ops since)"      post  "jj -R '@R@' op log --no-graph -n 50 -T 'id ++ \"\\t\" ++ description.first_line() ++ \"\\n\"' >/dev/null"
