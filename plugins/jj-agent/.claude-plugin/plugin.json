@@ -1,7 +1,7 @@
 {
   "name": "jj-agent",
   "displayName": "jj for agents",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Make coding agents use Jujutsu (jj) instead of git, only in jj repos (opt-in by having .jj; picked up mid-session): a non-interactive jj workflow skill, a git shim that blocks state-changing git, and a snapshot after every edit so each step lands in jj's operation log.",
   "author": { "name": "Yejun" },
   "license": "MIT",

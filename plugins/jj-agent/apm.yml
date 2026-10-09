@@ -1,0 +1,10 @@
+name: jj-agent
+version: 0.3.0
+description: "Make coding agents (Claude Code, Codex) use Jujutsu (jj) instead of git, only in jj repos: a non-interactive jj workflow skill, a git guard, and a snapshot around every step so git changes are reported and recoverable from jj's operation log."
+author: Yejun
+license: MIT
+# Hooks rely on Claude Code / Codex hook semantics (tool names, stdin/stdout JSON);
+# other harnesses would get hooks that silently never match.
+targets:
+  - claude
+  - codex

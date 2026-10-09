@@ -109,6 +109,7 @@ jj op restore <op-id>              # return the whole repo to the state after <o
 - `jj undo` undoes the latest operation. Repeated calls walk further back, and `jj redo` re-applies.
 - The latest operation may be an automatic "snapshot working copy" rather than your command. Read `jj op log` first and prefer `jj op restore <op-id>`.
 - Restore only to undo your own operations from this session. Ask the user before restoring past anything you did not do.
+- **"jj-agent: git ... during the last command"**: git changed the repo, possibly from inside a script you ran. The message names the operation from just before that command. Run `jj op show` on the operations after it to see what changed. If the change was not intended, restore single files with `jj restore --from 'at_operation(<op>, @)' <paths>`, or the whole repo with `jj op restore <op>`; the latter also drops everything else that command did. Then redo the step with jj.
 
 ## Fallback
 

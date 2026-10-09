@@ -1,1 +1,4 @@
 .DS_Store
+# APM working dirs (apm install / apm pack)
+apm_modules/
+build/

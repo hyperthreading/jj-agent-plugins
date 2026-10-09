@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# git shim for Claude Code sessions (put first on PATH by scripts/session-start.sh).
+# git shim for Claude Code sessions (put first on PATH by ../session-start.sh).
 # Outside a jj repo: transparent. Inside a jj repo:
 #   - calls made by jj itself (jj git fetch/push spawn git) → pass through
 #   - read-only git (rev-parse, ls-files, log, ...) → pass through, so helper scripts keep working

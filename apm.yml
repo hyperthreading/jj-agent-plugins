@@ -1,0 +1,15 @@
+name: yejun-jj
+version: 0.3.0
+description: Jujutsu (jj) support for coding agents
+license: MIT
+marketplace:
+  description: Jujutsu (jj) support for coding agents
+  owner:
+    name: Yejun
+  outputs:
+    claude: {}
+  packages:
+    - name: jj-agent
+      source: ./plugins/jj-agent
+      description: "Make coding agents use Jujutsu (jj) instead of git: workflow skill, git guard, and per-step snapshots"
+      version: 0.3.0
