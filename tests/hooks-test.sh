@@ -147,5 +147,38 @@ case $r in "git version"*) ok "two shims on PATH still reach real git" ;; *) bad
 r=$(cd "$tmp/full-path/my repo" && PATH="$tmp/shim-new:$PATH" JJ_SHIM_OFF= git commit -qm x 2>&1)
 case $r in *"Blocked: this is a jj"*) ok "shim blocks git commit in a jj repo" ;; *) bad "shim blocks git commit in a jj repo" "got [$r]" ;; esac
 
+echo "== no .jj (plain git repo, plain directory)"
+# Where there is no .jj the plugin must be inert: every hook silent, nothing written, no jj repo
+# created, and git through the shim behaves exactly like git.
+g=$tmp/plain-git d=$tmp/plain-dir data3=$tmp/data-nojj
+mkdir -p "$g" "$d"
+(cd "$g" && git init -q && git config user.email t@example.com && git config user.name t &&
+  echo a > a && git add a && git commit -qm first) || bad "plain git repo setup" "git init failed"
+for dir in "$g" "$d"; do
+  r=$(
+    : > "$tmp/env-nojj"
+    hook_input SessionStart "$dir" s1 x x | CLAUDE_ENV_FILE=$tmp/env-nojj CLAUDE_PLUGIN_DATA=$data3 $HB "$P/session-start.sh"
+    hook_input UserPromptSubmit "$dir" s1 x x | CLAUDE_PLUGIN_DATA=$data3 $HB "$P/user-prompt.sh"
+    hook_input PreToolUse "$dir" s2 Bash "git commit -am x" | CLAUDE_PLUGIN_DATA=$data3 $HB "$P/pre-tool.sh"
+    hook_input PostToolUse "$dir" s2 Bash "git commit -am x" | CLAUDE_PLUGIN_DATA=$data3 $HB "$P/post-tool.sh"
+    hook_input PostToolUseFailure "$dir" s3 Bash "false" | CLAUDE_PLUGIN_DATA=$data3 $HB "$P/post-tool.sh"
+    printf '{"session_id":"s1","cwd":"%s","hook_event_name":"PostToolUse","tool_name":"Write","tool_use_id":"s4","tool_input":{"file_path":"%s/a"}}' "$dir" "$dir" |
+      CLAUDE_PLUGIN_DATA=$data3 $HB "$P/post-tool.sh"
+    echo "rc=$?"
+  2>&1)
+  name=${dir##*/}
+  [ "$r" = "rc=0" ] && ok "$name: every hook silent, exit 0" || bad "$name: every hook silent, exit 0" "got [$r]"
+  [ ! -e "$dir/.jj" ] && ok "$name: no .jj created" || bad "$name: no .jj created" ".jj exists"
+done
+r=$(find "$data3" -type f 2>/dev/null | wc -l | tr -d ' ')
+[ "$r" = 0 ] && ok "no state files written" || bad "no state files written" "$(find "$data3" -type f)"
+r=$(cd "$g" && PATH="$tmp/shim-new:$PATH" JJ_SHIM_OFF= perl -e 'alarm 10; exec @ARGV' /bin/sh -c '
+  echo b >> a && git add a && git commit -qm second &&
+  git checkout -q -b feature && echo c >> a && git stash -q && git stash pop -q &&
+  git commit -qam third && git checkout -q - && git merge -q --ff-only feature &&
+  git reset -q --hard HEAD~1 && git log --format=%s' 2>&1)
+[ "$r" = "$(printf 'second\nfirst')" ] && ok "git through the shim works normally (commit, branch, stash, merge, reset)" ||
+  bad "git through the shim works normally (commit, branch, stash, merge, reset)" "got [$r]"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]
