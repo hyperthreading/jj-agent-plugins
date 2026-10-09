@@ -7,24 +7,26 @@
 #   CLAUDE_ENV_FILE (Codex) get no shim; post-tool.sh detects git changes there instead.
 # - Reset which repos Claude has been told about (context may have been cleared or compacted).
 # - If the session starts inside a jj repo, tell Claude now. Otherwise stay silent.
-HOOK_INPUT=$(cat)
-. "$(dirname "$0")/lib.sh"
-SESSION_ID=$(json_get session_id)
+. "${BASH_SOURCE%/*}/lib.sh"
+read_input
+json_get session_id SESSION_ID
 
 # Next to this script, so it is found both as a Claude plugin and when installed by APM.
-shim="$(cd "$(dirname "$0")" && pwd -P)/shim"
+shim="$(cd "${BASH_SOURCE%/*}" && pwd -P)/shim"
 [ -x "$shim/git" ] || chmod +x "$shim/git" 2>/dev/null
 if [ -n "$CLAUDE_ENV_FILE" ] && [ -x "$shim/git" ]; then
   q=$(printf '%q' "$shim")
   printf 'case ":$PATH:" in *:%s:*) ;; *) export PATH=%s:"$PATH" ;; esac\n' "$q" "$q" >> "$CLAUDE_ENV_FILE"
 fi
 
-sf=$(state_file); : > "$sf"
-find "$(dirname "$sf")" -type f -mtime +14 -exec rm -f {} + 2>/dev/null
+state_file
+if [ -f "$SF" ]; then : > "$SF"; fi
+find "${SF%/*}" -type f -mtime +14 -exec rm -f {} + 2>/dev/null
 # Baselines left behind by Bash calls whose PostToolUse never ran (interrupted, denied).
-find "$(dirname "$(baseline_file x)")" -type f -mtime +1 -exec rm -f {} + 2>/dev/null
+baseline_path x
+find "${BF%/*}" -type f -mtime +1 -exec rm -f {} + 2>/dev/null
 
-cwd=$(json_get cwd)
+json_get cwd cwd
 scan_dirs "${cwd:-${CLAUDE_PROJECT_DIR:-$PWD}}"
 [ -n "$NEW_CONTEXT" ] && emit_context SessionStart "$NEW_CONTEXT"
 exit 0

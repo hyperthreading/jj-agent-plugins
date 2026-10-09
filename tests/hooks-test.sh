@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Scenario tests for the jj-agent hooks. Each scenario runs a command between the PreToolUse and
 # PostToolUse hooks, the way Claude Code and Codex call them for a Bash tool call, and checks the
-# git-change report. Every scenario runs twice: with jq on PATH and without it.
+# git-change report. Every scenario runs twice: with the full PATH and with a minimal one (no jq,
+# no git shim). Hooks run under /bin/bash when it exists, like the hooks.json commands.
 #
 # usage: tests/hooks-test.sh [plugin-scripts-dir]   (default: plugins/jj-agent/scripts)
 # needs: bash, jj, git
@@ -15,6 +16,7 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/jj-agent-test.XXXXXX") || exit 2
 trap '[ -n "$tmp" ] && rm -rf -- "$tmp"' EXIT
 
 pass=0 fail=0
+HB=bash; [ -x /bin/bash ] && HB=/bin/bash   # interpreter, as in hooks.json
 ok()  { pass=$((pass + 1)); printf '  ok    %s\n' "$1"; }
 bad() { fail=$((fail + 1)); printf '  FAIL  %s\n        %s\n' "$1" "$2"; }
 
@@ -24,11 +26,11 @@ hook_input() { # event cwd tool_use_id tool_name command
     "$(json_esc "$2")" "$1" "$4" "$3" "$(json_esc "$5")"
 }
 
-# A PATH without jq (and without any git shim), to exercise the hooks' grep/sed fallback.
+# A minimal PATH without jq or any git shim: the hooks must not depend on either.
 make_nojq_path() {
   local d=$tmp/nojq-bin t p dir
   mkdir -p "$d"
-  for t in bash sh jj awk sed grep cut tr cksum dirname cat mkdir printf ls wc chmod head find rm ps basename env cp; do
+  for t in bash sh jj awk sed grep cut tr cksum dirname cat mkdir printf ls wc chmod head find rm ps basename env cp cmp; do
     p=$(type -P "$t") && ln -sf "$p" "$d/$t"
   done
   # real git: the first git on PATH that is not a shim
@@ -45,10 +47,10 @@ call() { # command [tool_name]
   local cmd=$1 tn=${2:-Bash} out
   n=$((n + 1))
   if [ "$tn" = Bash ]; then
-    hook_input PreToolUse "$repo" "tu$n" "$tn" "$cmd" | PATH=$hook_path bash "$P/pre-tool.sh"
+    hook_input PreToolUse "$repo" "tu$n" "$tn" "$cmd" | PATH=$hook_path $HB "$P/pre-tool.sh"
   fi
   (cd "$repo" && eval "$cmd") >/dev/null 2>&1
-  out=$(hook_input PostToolUse "$repo" "tu$n" "$tn" "$cmd" | PATH=$hook_path bash "$P/post-tool.sh")
+  out=$(hook_input PostToolUse "$repo" "tu$n" "$tn" "$cmd" | PATH=$hook_path $HB "$P/post-tool.sh")
   OUT=$(printf '%s' "$out" | sed -n 's/.*"additionalContext":"\(.*\)"}}$/\1/p')
 }
 
@@ -63,7 +65,7 @@ run_suite() { # label hook-PATH
   local label=$1 r op
   hook_path=$2 n=0
   export CLAUDE_PLUGIN_DATA=$tmp/$label/data
-  repo=$tmp/$label/repo
+  repo="$tmp/$label/my repo"   # a space in the path on purpose
   mkdir -p "$repo" "$tmp/$label/plain"
   (
     cd "$repo" && jj git init >/dev/null 2>&1 &&
@@ -105,18 +107,18 @@ run_suite() { # label hook-PATH
 
   # Outside a jj repo: no output, nothing written.
   local data2=$tmp/$label/data-plain
-  r=$( (hook_input PreToolUse "$tmp/$label/plain" x Bash "git commit" | CLAUDE_PLUGIN_DATA=$data2 PATH=$hook_path bash "$P/pre-tool.sh"
-        hook_input PostToolUse "$tmp/$label/plain" x Bash "git commit" | CLAUDE_PLUGIN_DATA=$data2 PATH=$hook_path bash "$P/post-tool.sh") 2>&1)
+  r=$( (hook_input PreToolUse "$tmp/$label/plain" x Bash "git commit" | CLAUDE_PLUGIN_DATA=$data2 PATH=$hook_path $HB "$P/pre-tool.sh"
+        hook_input PostToolUse "$tmp/$label/plain" x Bash "git commit" | CLAUDE_PLUGIN_DATA=$data2 PATH=$hook_path $HB "$P/post-tool.sh") 2>&1)
   if [ -z "$r" ] && [ ! -e "$data2" ]; then ok "outside jj repos: silent, writes nothing"; else bad "outside jj repos: silent, writes nothing" "output [$r]"; fi
 
   # SessionStart puts the shim on PATH (Claude Code).
   : > "$tmp/$label/env"
-  hook_input SessionStart "$repo" x x x | CLAUDE_ENV_FILE=$tmp/$label/env PATH=$hook_path bash "$P/session-start.sh" >/dev/null
+  hook_input SessionStart "$repo" x x x | CLAUDE_ENV_FILE=$tmp/$label/env PATH=$hook_path $HB "$P/session-start.sh" >/dev/null
   if grep -q "export PATH=.*$P/shim" "$tmp/$label/env"; then ok "SessionStart adds the shim to PATH"; else bad "SessionStart adds the shim to PATH" "$(cat "$tmp/$label/env")"; fi
 }
 
-if command -v jq >/dev/null 2>&1; then run_suite with-jq "$PATH"; else echo "== with-jq: skipped (jq not installed)"; fi
-run_suite without-jq "$(make_nojq_path)"
+run_suite full-path "$PATH"
+run_suite minimal-path "$(make_nojq_path)"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

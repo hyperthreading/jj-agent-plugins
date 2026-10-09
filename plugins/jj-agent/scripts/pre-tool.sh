@@ -2,22 +2,25 @@
 # PreToolUse (Bash)
 # Only acts inside jj repos; elsewhere it exits after a directory walk.
 # Snapshot right before the command, so `jj op log` holds the state it started from, and record a
-# baseline (operation id, git index hash and a copy of the index) for post-tool.sh to detect git changes the command makes.
+# baseline (operation id and a copy of the git index) for post-tool.sh to detect git changes the
+# command makes.
 # Never blocks or rewrites the command: Codex has no way to put the git shim on PATH, so detection
 # after the fact is the guard there (and a backstop behind the shim in Claude Code).
-HOOK_INPUT=$(cat)
-. "$(dirname "$0")/lib.sh"
+. "${BASH_SOURCE%/*}/lib.sh"
+read_input
 
-cwd=$(json_get cwd)
-root=$(find_jj_root "${cwd:-$PWD}") || exit 0
+json_get cwd cwd
+find_jj_root "${cwd:-$PWD}" || exit 0
+root=$JJ_ROOT
 command -v jj >/dev/null 2>&1 || exit 0
 
-SESSION_ID=$(json_get session_id)
-(cd "$root" && { jj util snapshot >/dev/null 2>&1 || jj st >/dev/null 2>&1; })
-op=$(current_op "$root")
+json_get session_id SESSION_ID
+json_get tool_use_id id
+baseline_path "$id"
+# One jj process: `jj op log` snapshots the working copy first, then prints the new head operation.
+op=$(jj -R "$root" op log --no-graph -n 1 -T id 2>/dev/null)
 [ -n "$op" ] || exit 0
-bf=$(baseline_file "$(json_get tool_use_id)")
-mkdir -p "$(dirname "$bf")" 2>/dev/null
-printf '%s\n%s\n%s\n' "$root" "$op" "$(index_hash "$root")" > "$bf"
-save_index "$root" "$bf.index" || rm -f "$bf.index"
+[ -d "${BF%/*}" ] || mkdir -p "${BF%/*}" 2>/dev/null
+save_index "$root" "$BF.index" || rm -f "$BF.index"
+printf '%s\n%s\n' "$root" "$op" > "$BF"
 exit 0

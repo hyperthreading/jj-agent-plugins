@@ -20,6 +20,7 @@ export JJ_SHIM_OFF=1
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/jj-agent-bench.XXXXXX") || exit 2
 trap '[ -n "$tmp" ] && rm -rf -- "$tmp"' EXIT
 export CLAUDE_PLUGIN_DATA=$tmp/data
+HB=bash; [ -x /bin/bash ] && HB=/bin/bash   # interpreter, as in hooks.json
 
 input() { # event cwd tool_name
   printf '{"session_id":"bench","cwd":"%s","hook_event_name":"%s","tool_name":"%s","tool_use_id":"b1","tool_input":{"command":"x","file_path":"%s/f0"}}' "$2" "$1" "$3" "$2"
@@ -27,8 +28,8 @@ input() { # event cwd tool_name
 # ms for one hook run; perl's own startup is outside the measured window.
 timed() { # script event cwd tool_name
   input "$2" "$3" "$4" > "$tmp/in.json"
-  perl -MTime::HiRes=time -e 'my $t = time; system("bash", $ARGV[0]); printf "%.1f\n", (time - $t) * 1000' \
-    "$1" < "$tmp/in.json" 2>/dev/null
+  perl -MTime::HiRes=time -e 'my $t = time; system($ARGV[1], $ARGV[0]); printf "%.1f\n", (time - $t) * 1000' \
+    "$1" "$HB" < "$tmp/in.json" 2>/dev/null
 }
 median() { sort -n | awk '{ a[NR] = $1 } END { print (NR % 2) ? a[(NR + 1) / 2] : (a[NR / 2] + a[NR / 2 + 1]) / 2 }'; }
 
@@ -41,7 +42,7 @@ bench_repo() { # label dir is_jj
     if [ "$3" = 1 ]; then
       echo "edit $i" >> "$d/f0"
       (cd "$d" && jj util snapshot >/dev/null 2>&1)
-      input PreToolUse "$d" Bash | bash "$P/pre-tool.sh"
+      input PreToolUse "$d" Bash | $HB "$P/pre-tool.sh"
       (cd "$d" && git checkout -- f0 2>/dev/null)
       timed "$P/post-tool.sh" PostToolUse "$d" Bash >> "$tmp/postg"
       echo "edit $i" >> "$d/f0"

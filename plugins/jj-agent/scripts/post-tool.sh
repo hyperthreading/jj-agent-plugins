@@ -6,39 +6,43 @@
 #   the command, tell Claude what happened and which operation to restore.
 # - If this step is the first time Claude touches a jj repo in this session (e.g. it just ran
 #   `jj git init`, or cd'd into a jj repo), tell Claude next to the tool result.
-HOOK_INPUT=$(cat)
-. "$(dirname "$0")/lib.sh"
+. "${BASH_SOURCE%/*}/lib.sh"
+read_input
 
-file=$(json_get file_path); [ -n "$file" ] || file=$(json_get notebook_path)
-cwd=$(json_get cwd)
-fdir=; [ -n "$file" ] && fdir=$(dirname "$file")
-SESSION_ID=$(json_get session_id)
+json_get file_path file; [ -n "$file" ] || json_get notebook_path file
+json_get cwd cwd; cwd=${cwd:-$PWD}
+fdir=; [ -n "$file" ] && fdir=${file%/*}
 
-# Read the baseline and the git index before any jj command below can touch them.
-bf=$(baseline_file "$(json_get tool_use_id)")
-broot= bop= bidx= filled=
-if [ -f "$bf" ]; then
-  { IFS= read -r broot; IFS= read -r bop; IFS= read -r bidx; } < "$bf"
-  if [ -n "$bidx" ] && [ -f "$bf.index" ] && [ "$(index_hash "$broot")" != "$bidx" ]; then
-    filled=$(git_filled_paths "$broot" "$bf.index")
+# Cheap exit when no candidate is inside a jj repo. pre-tool.sh only records a baseline inside one.
+find_jj_root "$fdir" || find_jj_root "$cwd" || exit 0
+
+json_get session_id SESSION_ID
+json_get tool_use_id id
+baseline_path "$id"
+broot= bop=
+if [ -f "$BF" ]; then
+  { IFS= read -r broot; IFS= read -r bop; } < "$BF"
+  # If the git index changed, copy it before any jj command below can rewrite it.
+  if [ -f "$BF.index" ] && ! cmp -s "$BF.index" "$broot/.git/index" 2>/dev/null; then
+    save_index "$broot" "$BF.post"
   fi
-  rm -f "$bf" "$bf.index"
 fi
 
-# Cheap exit before anything else when no candidate is inside a jj repo.
-[ -n "$broot" ] || find_jj_root "$fdir" >/dev/null || find_jj_root "${cwd:-$PWD}" >/dev/null || exit 0
+scan_dirs "$fdir" "$cwd" ${broot:+"$broot"}
 
-scan_dirs "$fdir" "${cwd:-$PWD}" ${broot:+"$broot"}
-
-report=
+REPORT=
 if command -v jj >/dev/null 2>&1; then
-  printf '%s\n' "$JJ_ROOTS" | while IFS= read -r r; do
-    [ -n "$r" ] || continue
-    (cd "$r" && { jj util snapshot >/dev/null 2>&1 || jj st >/dev/null 2>&1; })
+  for r in "${JJ_ROOTS[@]}"; do
+    if [ "$r" = "$broot" ] && [ -n "$bop" ]; then
+      git_report "$broot" "$bop" "$BF.index" "$BF.post"   # snapshots as part of it
+    else
+      jj -R "$r" util snapshot >/dev/null 2>&1
+    fi
   done
-  [ -n "$broot" ] && report=$(git_report "$broot" "$bop" "$filled")
 fi
 
-msg="$NEW_CONTEXT${NEW_CONTEXT:+${report:+ }}$report"
+[ -n "$broot" ] && rm -f "$BF" "$BF.index" "$BF.post"
+
+msg="$NEW_CONTEXT${NEW_CONTEXT:+${REPORT:+ }}$REPORT"
 [ -n "$msg" ] && emit_context PostToolUse "$msg"
 exit 0

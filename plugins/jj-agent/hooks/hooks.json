@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh\"",
+            "command": "if [ -x /bin/bash ]; then /bin/bash \"${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh\"; else bash \"${CLAUDE_PLUGIN_ROOT}/scripts/session-start.sh\"; fi",
             "timeout": 15
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/user-prompt.sh\"",
+            "command": "if [ -x /bin/bash ]; then /bin/bash \"${CLAUDE_PLUGIN_ROOT}/scripts/user-prompt.sh\"; else bash \"${CLAUDE_PLUGIN_ROOT}/scripts/user-prompt.sh\"; fi",
             "timeout": 10
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/pre-tool.sh\"",
+            "command": "if [ -x /bin/bash ]; then /bin/bash \"${CLAUDE_PLUGIN_ROOT}/scripts/pre-tool.sh\"; else bash \"${CLAUDE_PLUGIN_ROOT}/scripts/pre-tool.sh\"; fi",
             "timeout": 30
           }
         ]
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/post-tool.sh\"",
+            "command": "if [ -x /bin/bash ]; then /bin/bash \"${CLAUDE_PLUGIN_ROOT}/scripts/post-tool.sh\"; else bash \"${CLAUDE_PLUGIN_ROOT}/scripts/post-tool.sh\"; fi",
             "timeout": 30
           }
         ]

@@ -9,7 +9,7 @@ The plugin is opt-in per repository: a directory with `.jj/` (from `jj git init`
 | `skills/jj` | How to use jj without thinking much: a fixed task loop, an intent→command table, conflict and push recipes, and a `--help` fallback with a legacy→current command map. Verified against jj 0.46. |
 | `scripts/shim/git` | Claude Code only. A `git` wrapper first on the Bash tool's `PATH`. Outside jj repos it hands everything straight to git. Inside a jj repo it lets through calls made by jj itself and read-only git (`rev-parse`, `ls-files`, ...). It blocks anything that changes state and prints the jj equivalent. It checks for `.jj` on every call, so it starts guarding as soon as a repo is converted. |
 | `SessionStart` | Claude Code: puts the shim on `PATH` via `CLAUDE_ENV_FILE`. Both: if the session starts in a jj repo, tells the agent so. |
-| `PreToolUse` (Bash) | In jj repos only: runs `jj util snapshot` right before the command and records the operation id and a copy of the git index (copy-on-write where possible). Never blocks or rewrites the command. |
+| `PreToolUse` (Bash) | In jj repos only: snapshots right before the command and records the operation id and a copy of the git index (copy-on-write where possible). Never blocks or rewrites the command. |
 | `PostToolUse` | In jj repos only: runs `jj util snapshot` after each edit or command, so each step lands in `jj op log`. After a Bash command it reports git changes with the operation to restore (see below). The first time the agent touches a jj repo in a session (it ran `jj git init`, or `cd`'d into one), it tells the agent once. |
 | `UserPromptSubmit` | Catches a repo converted between turns, e.g. in your own terminal, and tells the agent once. |
 
@@ -43,7 +43,7 @@ To try it in Claude Code without installing: `claude --plugin-dir /path/to/jj-ag
 
 Requirements:
 - `jj` on `PATH`.
-- `jq` is optional. The hooks fall back to grep/sed for reading hook input.
+- Nothing else: the hooks parse their input with bash builtins (no jq). They run under `/bin/bash` when it exists, otherwise the `bash` on `PATH`.
 
 ## Notes
 
@@ -52,7 +52,7 @@ Requirements:
 - **The shim affects only Claude Code's Bash tool.** Your terminal is untouched.
 - **What the shim cannot see:** git called by absolute path (`/usr/bin/git`), scripts that reset `PATH`, libgit2-based tools, and git MCP servers. The snapshots and the git-change report cover what slips through.
 - **Conflict markers:** the skill's preflight runs `jj config set --repo ui.conflict-marker-style git`. This changes how conflicts look in that repo for humans too.
-- **Large repos:** every Bash command now runs two snapshots. If that feels slow, enable watchman (`core.fsmonitor = "watchman"`).
+- **Latency:** a Bash command in a jj repo costs two jj processes, about 55 ms in a small repo on macOS. Snapshots grow with repo size (about 135 ms at 30,000 files); enable watchman (`core.fsmonitor = "watchman"`) for large repos. Measure with `tests/hooks-bench.sh` and `tests/hooks-profile.sh`.
 
 ## Development
 

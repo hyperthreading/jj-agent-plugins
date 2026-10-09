@@ -66,14 +66,14 @@ jj-agent-marketplace/
 **감지는 Bash 명령 앞뒤에서 기준점을 비교하는 방식으로 한다.**
 
 1. **PreToolUse(`Bash`), `pre-tool.sh`:** jj repo 안에서만 동작한다.
-   - `jj util snapshot`을 실행한다.
-   - 그 직후의 op id와 `.git/index` 내용 hash를 tool call별(`tool_use_id`) baseline으로 기록한다. `.git/index`의 사본도 함께 둔다. 사본은 APFS에서 `cp -c`(clone), Linux에서 `cp --reflink=auto`로 만들어서 비용을 줄인다.
+   - `jj op log -n1`을 실행한다. 이 명령은 snapshot을 먼저 하고 그 결과 op id를 출력하므로 jj 프로세스 하나로 끝난다.
+   - op id와 `.git/index` 사본을 tool call별(`tool_use_id`) baseline으로 남긴다. 사본은 APFS에서 `cp -c`(clone), Linux에서 `cp --reflink=auto`로 만들어서 비용을 줄인다.
    - 차단하거나 명령을 고쳐 쓰지는 않는다.
-2. **PostToolUse(`Bash`), `post-tool.sh`:** 어떤 jj 명령보다 **먼저** `.git/index`를 읽는다. jj가 HEAD 변경을 import하면서 index를 다시 쓰기 때문이다. 그다음 snapshot하고 판정한다.
+2. **PostToolUse(`Bash`), `post-tool.sh`:** 어떤 jj 명령보다 **먼저** `.git/index`를 사본과 비교(`cmp`)한다. 다르면 현재 index도 복제해 둔다. jj가 HEAD 변경을 import하면서 index를 다시 쓰기 때문이다. 그다음 `jj op log -n50`으로 snapshot과 op 목록 읽기를 한 번에 하고 판정한다.
    - **신호 1, HEAD/ref 변경:** 기록해 둔 op 이후의 op에 `import git head` 또는 `import git refs`가 있다.
-   - **신호 2, git이 다시 쓴 파일:** 아래 두 path 집합의 교집합이 비어 있지 않다. index hash가 바뀐 경우에만 계산한다.
-     - **A, git이 index 정보를 새로 채운 path:** `git ls-files --debug`로 사본과 현재 index를 비교한다. stat 정보가 바뀌었고 새 값이 0이 아닌 entry다.
-     - **B, 내용이 바뀐 path:** `jj diff --from 'at_operation(<pre op>, @)' --to @ --name-only`. 명령 직전과 직후 working copy tree의 차이다.
+   - **신호 2, git이 다시 쓴 파일:** 아래 두 path 집합의 교집합이 비어 있지 않다. index가 바뀐 경우에만 계산한다.
+     - **B, 내용이 바뀐 path:** `jj diff --from 'at_operation(<pre op>, @)' --to @ --name-only`. 명령 직전과 직후 working copy tree의 차이다. 먼저 구한다.
+     - **A, git이 index 정보를 새로 채운 path:** B가 비어 있지 않을 때만 B의 path에 한정해 `git ls-files --debug`로 두 index 사본을 비교한다. stat 정보가 바뀌었고 새 값이 0이 아닌 entry다. `jj commit`처럼 index는 바뀌지만 파일 내용은 그대로인 명령에서는 실행되지 않는다.
 3. 신호가 하나라도 있으면 `additionalContext`로 알린다.
    - 신호 2가 있으면 해당 path 목록을 함께 준다.
    - pre 시점의 op id(복구 지점)를 알려준다.
@@ -108,21 +108,35 @@ jj-agent-marketplace/
 
 **남는 한계:**
 - **오탐:** 같은 명령 안에서 파일을 git이 아닌 방법(`sed`, `jj restore`, `jj abandon` 등)으로 index 내용(`@-`)으로 되돌리고, 그 뒤에 git이 그 파일을 읽으면 A∩B에 들어간다. 이 경우 알림만 나가고 아무것도 되돌리지 않는다. 알림에 path 목록과 "직접 되돌렸다면 무시하라"는 안내가 있어서 agent가 판단할 수 있다.
-- **비용:** Bash 호출마다 index 사본을 만든다. clone을 지원하지 않는 filesystem에서는 실제로 복사한다. `git ls-files --debug`와 `jj diff`는 index hash가 바뀐 경우에만 실행한다.
-- **측정 (`tests/hooks-bench.sh`, macOS, jj 0.46, median ms, git shim 없는 PATH):**
+- **비용:** Bash 호출마다 jj repo 안에서 jj 프로세스 2개(pre와 post에 하나씩)와 index 사본이 든다. clone을 지원하지 않는 filesystem에서는 실제로 복사한다. hook은 `/bin/bash`가 있으면 그것으로 실행한다(없으면 PATH의 `bash`). 입력 파싱과 jj repo 탐색은 bash 내장 기능만 써서 jq나 `dirname` 프로세스를 띄우지 않는다.
+- **측정** (`tests/hooks-bench.sh`, `tests/hooks-profile.sh`, macOS, jj 0.46, median ms, git shim 없는 PATH). Bash 호출 1회 기준이고, 괄호 안은 최적화 전 값이다.
 
-  | repo | pre | post | post+git | v0.2.0 post |
+  | repo | pre | post | post+git | post(edit) |
   |---|---|---|---|---|
-  | jj repo 아님 | 46 | 96 | – | 84 |
-  | 10 files | 91 | 110 | 92 | 68 |
-  | 5,000 files | 99 | 118 | 118 | – |
-  | 30,000 files | 131 | 150 | 264 | 105 |
+  | jj repo 아님 | 3 (46) | 3 (96) | – | – |
+  | 10 files | 26 (91) | 29 (110) | 64 | 52 |
+  | 5,000 files | 35 (99) | 39 (118) | 72 | 62 |
+  | 30,000 files | 64 (131) | 72 (150) | 97 | 102 |
 
-  - jj repo 안의 Bash 호출 한 번에 pre와 post를 합쳐 약 200~280ms가 든다. v0.2.0은 post만 약 70~105ms였다.
-  - jj repo 밖에서도 약 140ms가 든다. 원인 대부분은 고정 비용이다: bash 시작(MacPorts bash 15ms, `/bin/bash`는 3ms), 필드마다 따로 띄우는 jq(약 10ms씩), `dirname`으로 상위 디렉터리를 찾는 루프, jj 프로세스(약 20~25ms씩).
+  단계별 비용(10 files / 30,000 files):
+
+  | 단계 | hook | ms |
+  |---|---|---|
+  | `/bin/bash` 시작 | 둘 다 | 1.5 / 1.7 |
+  | lib.sh 로드, 입력 파싱, jj repo 탐색 | 둘 다 | 1.1 / 1.2 |
+  | `jj op log -n1` (snapshot 포함) | pre | 19 / 53 |
+  | index 사본 (`cp -c`) | pre | 2 / 2 |
+  | `cmp` index | post | 2 / 6 |
+  | `jj op log -n50` (snapshot 포함) | post | 20 / 53 |
+  | baseline 파일 삭제 | post | 3 / 3 |
+  | index가 바뀌었을 때: 사본 + `jj diff` | post | 22 / 22 |
+  | 내용이 바뀐 파일도 있을 때: `ls-files` ×2 | post | 54 / 54 |
+
+  - 작은 repo에서는 Bash 호출 1회에 약 55ms가 든다. 남은 비용은 대부분 jj 프로세스 2개다.
+  - 큰 repo에서는 snapshot 비용이 파일 수에 비례해서 30,000 파일이면 약 136ms다. watchman(`core.fsmonitor`)으로 줄여야 한다.
+  - 최적화 전에는 고정 비용이 컸다. PATH의 MacPorts bash가 시작에만 15ms(`/bin/bash`는 3ms), jq를 필드마다 띄우는 데 약 10ms씩, `dirname` 루프, hook마다 jj 프로세스 2개가 들었다.
 - `git clean`: jj가 snapshot한 파일은 git index에 내용 없는 entry로 올라가 있다. 그래서 `git clean -fd`는 이 파일들을 지우지 않는다(구현 중 실험으로 확인했다). 지워지는 것은 snapshot 뒤 같은 명령 안에서 새로 만든 파일, 그리고 `-x`로 지정한 ignored 파일뿐이다. 앞의 것은 명령의 의도이고, 뒤의 것은 jj도 추적하지 않는다.
 - `jj op restore`는 그 명령이 한 정상적인 변경도 함께 되돌린다. 그래서 agent에게 먼저 확인하라고 안내한다.
-- Bash 호출마다 jj snapshot이 한 번 더 돈다. 큰 repo라면 watchman을 권장한다(README에 이미 있음).
 
 **이 방식을 고른 이유:** PreToolUse 차단은 명령 문자열을 heuristic으로 파싱해야 하고, 그래도 스크립트 안의 git은 놓친다. 명령을 고쳐 쓰는 방식은 승인 규칙과 화면 표시에 영향을 준다. 감지는 실제 상태 변화를 근거로 삼는다. 그래서 스크립트가 HEAD를 바꾼 경우까지 잡고, 명령에는 손대지 않는다. 손실 범위는 jj의 per-step snapshot이 이미 좁혀 두었다.
 
