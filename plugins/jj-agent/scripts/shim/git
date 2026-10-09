@@ -6,14 +6,16 @@
 #   - anything that changes refs, index or working copy → blocked with a jj hint
 # bash 3.2 compatible (macOS /bin/bash).
 
-shim_dir=$(cd "$(dirname "$0")" && pwd -P)
-
+# The first git on PATH that is not a copy of this shim. After a plugin update the session PATH can
+# hold the old and the new shim directory; skipping only our own directory made them exec each
+# other forever, so every shim copy is recognized by its second line.
 real_git() {
-  local IFS=: d
+  local IFS=: d l1 l2
   for d in $PATH; do
-    [ -n "$d" ] || continue
-    [ "$(cd "$d" 2>/dev/null && pwd -P)" = "$shim_dir" ] && continue
-    if [ -x "$d/git" ]; then exec "$d/git" "$@"; fi
+    [ -n "$d" ] && [ -x "$d/git" ] || continue
+    l2=; { IFS= read -r l1; IFS= read -r l2; } < "$d/git" 2>/dev/null
+    case $l2 in "# git shim for Claude Code sessions"*) continue ;; esac
+    exec "$d/git" "$@"
   done
   echo "git shim: real git not found on PATH" >&2
   exit 127

@@ -69,7 +69,7 @@ jj-agent-marketplace/
    - `jj op log -n1`을 실행한다. 이 명령은 snapshot을 먼저 하고 그 결과 op id를 출력하므로 jj 프로세스 하나로 끝난다.
    - op id와 `.git/index` 사본을 tool call별(`tool_use_id`) baseline으로 남긴다. 사본은 APFS에서 `cp -c`(clone), Linux에서 `cp --reflink=auto`로 만들어서 비용을 줄인다.
    - 차단하거나 명령을 고쳐 쓰지는 않는다.
-2. **PostToolUse(`Bash`), `post-tool.sh`:** 어떤 jj 명령보다 **먼저** `.git/index`를 사본과 비교(`cmp`)한다. 다르면 현재 index도 복제해 둔다. jj가 HEAD 변경을 import하면서 index를 다시 쓰기 때문이다. 그다음 `jj op log -n50`으로 snapshot과 op 목록 읽기를 한 번에 하고 판정한다.
+2. **PostToolUse(`Bash`), `post-tool.sh`:** Claude Code는 exit code가 0이 아닌 명령에 PostToolUse 대신 PostToolUseFailure를 보내므로, 같은 스크립트를 두 이벤트에 건다. Codex는 실패한 명령에도 PostToolUse를 보내고, 모르는 이벤트 이름(`PostToolUseFailure`)은 무시한다(실험으로 확인). 어떤 jj 명령보다 **먼저** `.git/index`를 사본과 비교(`cmp`)한다. 다르면 현재 index도 복제해 둔다. jj가 HEAD 변경을 import하면서 index를 다시 쓰기 때문이다. 그다음 `jj op log -n50`으로 snapshot과 op 목록 읽기를 한 번에 하고 판정한다.
    - **신호 1, HEAD/ref 변경:** 기록해 둔 op 이후의 op에 `import git head` 또는 `import git refs`가 있다.
    - **신호 2, git이 다시 쓴 파일:** 아래 두 path 집합의 교집합이 비어 있지 않다. index가 바뀐 경우에만 계산한다.
      - **B, 내용이 바뀐 path:** `jj diff --from 'at_operation(<pre op>, @)' --to @ --name-only`. 명령 직전과 직후 working copy tree의 차이다. 먼저 구한다.

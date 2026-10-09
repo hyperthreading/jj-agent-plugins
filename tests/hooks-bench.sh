@@ -16,6 +16,14 @@ here=$(cd "$(dirname "$0")" && pwd -P)
 P=$(cd "${1:-$here/../plugins/jj-agent/scripts}" && pwd -P) || exit 2
 runs=${2:-15}
 export JJ_SHIM_OFF=1
+# Drop installed jj-agent shims from PATH: measure plain git, not the session's plugin copy.
+_p=; IFS=: read -r -a _dirs <<< "$PATH"
+for _d in "${_dirs[@]}"; do
+  if [ -x "$_d/git" ]; then { IFS= read -r _l1; IFS= read -r _l2; } < "$_d/git" 2>/dev/null
+    case $_l2 in "# git shim for Claude Code sessions"*) continue ;; esac; fi
+  _p=${_p:+$_p:}$_d
+done
+export PATH=$_p
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/jj-agent-bench.XXXXXX") || exit 2
 trap '[ -n "$tmp" ] && rm -rf -- "$tmp"' EXIT

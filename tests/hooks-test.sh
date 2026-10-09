@@ -11,6 +11,12 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd -P)
 P=$(cd "${1:-$here/../plugins/jj-agent/scripts}" && pwd -P) || exit 2
 export JJ_SHIM_OFF=1   # scenarios run git directly; this only matters when a git shim is on PATH
+# Drop installed jj-agent shims from PATH: the tests must not depend on the session's plugin copy.
+is_shim() { local l1 l2; { IFS= read -r l1; IFS= read -r l2; } < "$1" 2>/dev/null; case $l2 in "# git shim for Claude Code sessions"*) return 0 ;; esac; return 1; }
+clean_path=
+IFS=: read -r -a _dirs <<< "$PATH"
+for _d in "${_dirs[@]}"; do [ -x "$_d/git" ] && is_shim "$_d/git" && continue; clean_path=${clean_path:+$clean_path:}$_d; done
+export PATH=$clean_path
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/jj-agent-test.XXXXXX") || exit 2
 trap '[ -n "$tmp" ] && rm -rf -- "$tmp"' EXIT
@@ -36,21 +42,22 @@ make_nojq_path() {
   # real git: the first git on PATH that is not a shim
   local IFS=:
   for dir in $PATH; do
-    if [ -x "$dir/git" ] && ! grep -q 'git shim' "$dir/git" 2>/dev/null; then ln -sf "$dir/git" "$d/git"; break; fi
+    if [ -x "$dir/git" ] && ! is_shim "$dir/git"; then ln -sf "$dir/git" "$d/git"; break; fi
   done
   printf '%s' "$d"
 }
 
 # Run one tool call against $repo: pre hook (Bash only), the command, post hook. Sets OUT to the
-# additionalContext text (empty if none).
-call() { # command [tool_name]
-  local cmd=$1 tn=${2:-Bash} out
+# additionalContext text (empty if none). post_event is PostToolUseFailure for a failed command.
+call() { # command [tool_name] [post_event]
+  local cmd=$1 tn=${2:-Bash} ev=${3:-PostToolUse} out
   n=$((n + 1))
   if [ "$tn" = Bash ]; then
     hook_input PreToolUse "$repo" "tu$n" "$tn" "$cmd" | PATH=$hook_path $HB "$P/pre-tool.sh"
   fi
   (cd "$repo" && eval "$cmd") >/dev/null 2>&1
-  out=$(hook_input PostToolUse "$repo" "tu$n" "$tn" "$cmd" | PATH=$hook_path $HB "$P/post-tool.sh")
+  out=$(hook_input "$ev" "$repo" "tu$n" "$tn" "$cmd" | PATH=$hook_path $HB "$P/post-tool.sh")
+  RAW=$out
   OUT=$(printf '%s' "$out" | sed -n 's/.*"additionalContext":"\(.*\)"}}$/\1/p')
 }
 
@@ -101,6 +108,9 @@ run_suite() { # label hook-PATH
   echo s >> "$repo/h"
   call "jj restore h && git status";                    expect "jj restore + git status (known false positive)" "git rewrote these files: h"
   call "echo q >> g" apply_patch;                       expect "Codex apply_patch (no PreToolUse)" ""
+  echo k >> "$repo/f"
+  call "./reset-f.sh; false" Bash PostToolUseFailure;   expect "failed command (PostToolUseFailure)" "git rewrote these files: f"
+  case $RAW in *'"hookEventName":"PostToolUseFailure"'*) ok "failure report uses the PostToolUseFailure event name" ;; *) bad "failure report uses the PostToolUseFailure event name" "got [$RAW]" ;; esac
 
   r=$(ls "$CLAUDE_PLUGIN_DATA/baselines" 2>/dev/null | wc -l | tr -d ' ')
   [ "$r" = 0 ] && ok "no baselines left behind" || bad "no baselines left behind" "$r left"
@@ -119,6 +129,15 @@ run_suite() { # label hook-PATH
 
 run_suite full-path "$PATH"
 run_suite minimal-path "$(make_nojq_path)"
+
+echo "== shim"
+# Two shim copies on PATH (old and new plugin version after an update) must not exec each other.
+mkdir -p "$tmp/shim-old" "$tmp/shim-new"
+cp "$P/shim/git" "$tmp/shim-old/git"; cp "$P/shim/git" "$tmp/shim-new/git"
+r=$(cd "$tmp" && PATH="$tmp/shim-new:$tmp/shim-old:$PATH" perl -e 'alarm 5; exec @ARGV' git --version 2>&1)
+case $r in "git version"*) ok "two shims on PATH still reach real git" ;; *) bad "two shims on PATH still reach real git" "got [$r]" ;; esac
+r=$(cd "$tmp/full-path/my repo" && PATH="$tmp/shim-new:$PATH" JJ_SHIM_OFF= git commit -qm x 2>&1)
+case $r in *"Blocked: this is a jj"*) ok "shim blocks git commit in a jj repo" ;; *) bad "shim blocks git commit in a jj repo" "got [$r]" ;; esac
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

@@ -45,6 +45,18 @@
           }
         ]
       }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -x /bin/bash ]; then /bin/bash \"${CLAUDE_PLUGIN_ROOT}/scripts/post-tool.sh\"; else bash \"${CLAUDE_PLUGIN_ROOT}/scripts/post-tool.sh\"; fi",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

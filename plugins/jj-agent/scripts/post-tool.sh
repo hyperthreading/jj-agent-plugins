@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# PostToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash; Codex matches apply_patch as Edit/Write)
+# PostToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash; Codex matches apply_patch as Edit/Write), and
+# PostToolUseFailure (Bash): Claude Code skips PostToolUse when a command exits non-zero.
 # Only acts inside jj repos; elsewhere it exits after a directory walk.
 # - Snapshot the jj working copy so every agent step lands in `jj op log`.
 # - After a Bash command that pre-tool.sh recorded a baseline for: if git changed the repo during
@@ -44,5 +45,6 @@ fi
 [ -n "$broot" ] && rm -f "$BF" "$BF.index" "$BF.post"
 
 msg="$NEW_CONTEXT${NEW_CONTEXT:+${REPORT:+ }}$REPORT"
-[ -n "$msg" ] && emit_context PostToolUse "$msg"
+json_get hook_event_name event
+[ -n "$msg" ] && emit_context "${event:-PostToolUse}" "$msg"
 exit 0
