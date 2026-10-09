@@ -67,37 +67,48 @@ jj-agent-marketplace/
 
 1. **PreToolUse(`Bash`), `pre-tool.sh`:** jj repo 안에서만 동작한다.
    - `jj util snapshot`을 실행한다.
-   - 그 직후의 op id와 `.git/index` 내용 hash를 repo별·session별 state에 기록한다.
+   - 그 직후의 op id와 `.git/index` 내용 hash를 tool call별(`tool_use_id`) baseline으로 기록한다. `.git/index`의 사본도 함께 둔다. 사본은 APFS에서 `cp -c`(clone), Linux에서 `cp --reflink=auto`로 만들어서 비용을 줄인다.
    - 차단하거나 명령을 고쳐 쓰지는 않는다.
-2. **PostToolUse(`Bash`), `post-tool.sh`:** 자기 snapshot을 하기 **전에** `.git/index` hash를 먼저 읽는다. 그다음 snapshot하고, 기록해 둔 op 이후의 operation을 본다.
-   - **강한 신호 1:** op에 `import git head` 또는 `import git refs`가 있다. git이 HEAD나 ref를 바꾼 것이다.
-   - **강한 신호 2:** `.git/index` 내용이 바뀌었고, 그 사이에 snapshot 외의 jj op가 없다. git이 working copy를 바꾼 것이다. 스크립트 안에서 호출된 git도 잡는다.
-   - **약한 신호:** 명령 문자열에 상태를 바꾸는 `git` subcommand가 있고, 그 사이에 파일이 바뀌었다(snapshot op가 있다).[^mixed]
+2. **PostToolUse(`Bash`), `post-tool.sh`:** 어떤 jj 명령보다 **먼저** `.git/index`를 읽는다. jj가 HEAD 변경을 import하면서 index를 다시 쓰기 때문이다. 그다음 snapshot하고 판정한다.
+   - **신호 1, HEAD/ref 변경:** 기록해 둔 op 이후의 op에 `import git head` 또는 `import git refs`가 있다.
+   - **신호 2, git이 다시 쓴 파일:** 아래 두 path 집합의 교집합이 비어 있지 않다. index hash가 바뀐 경우에만 계산한다.
+     - **A, git이 index 정보를 새로 채운 path:** `git ls-files --debug`로 사본과 현재 index를 비교한다. stat 정보가 바뀌었고 새 값이 0이 아닌 entry다.
+     - **B, 내용이 바뀐 path:** `jj diff --from 'at_operation(<pre op>, @)' --to @ --name-only`. 명령 직전과 직후 working copy tree의 차이다.
 3. 신호가 하나라도 있으면 `additionalContext`로 알린다.
+   - 신호 2가 있으면 해당 path 목록을 함께 준다.
    - pre 시점의 op id(복구 지점)를 알려준다.
-   - 복구 순서: `jj op show <id>`로 확인한 뒤 `jj op restore <id>`, 또는 파일 단위로 `jj restore --from`.
-   - 앞으로는 jj를 쓰라고 안내한다.
+   - 복구 방법: `jj op show`로 확인한 뒤 파일 단위로 `jj restore --from 'at_operation(<op>, @)' <paths>`, 또는 `jj op restore <op>`.
+   - 직접 되돌린 파일이면 무시하라고 덧붙인다.
 4. Edit/Write 계열에 대한 PostToolUse는 지금처럼 snapshot만 한다.
+
+**A∩B가 git의 쓰기를 가려내는 이유:**
+- **jj가 index를 쓰는 방식:** jj는 parent를 바꿀 때 index를 다시 쓰고, 바뀐 entry의 stat 정보를 0으로 비워 둔다.
+- **git이 stat을 채우는 조건:** git은 파일 내용이 index와 같은 entry에만 stat을 채운다. `git status`/`describe`가 갱신할 때도, `checkout -- <path>`/`restore`/`stash`/`reset`으로 파일을 다시 쓸 때도 마찬가지다.
+
+| 같은 명령 안에서 | A | B | 결과 |
+|---|---|---|---|
+| `git checkout -- f`, `restore`, `stash`, `reset --hard` | f | f | 감지 |
+| `sed`로 f 편집 (+ `git status`) | – | f | 알림 없음. f 내용이 index와 달라 stat이 채워지지 않음 |
+| `git status`/`describe`의 stat 갱신 | g, h | – | 알림 없음 |
+| `jj commit`, `jj new <rev>` | –(0으로 비움) | 바뀐 파일 | 알림 없음 |
+| `jj commit && ./script.sh`(안에서 `git checkout -- f`) | f | f(내용이 사라졌다면) | 감지 |
 
 **실험(jj 0.46, colocated repo)으로 확인한 것:**
 - `git commit`, `git reset --hard HEAD~1`은 다음 jj 명령에서 `import git head` op를 남긴다.
 - `git checkout -- f`, `git stash`는 op 설명으로는 평소 편집(`snapshot working copy`)과 구분되지 않는다.
-- `.git/index` **내용**의 변화:
-
-  | 바뀐다 | 바뀌지 않는다 |
-  |---|---|
-  | `git checkout -- f`, `git restore`, `git stash`, `git reset --hard HEAD`, `jj commit`(parent가 바뀌므로) | `jj util snapshot`, `jj new`, `jj st`(이 셋은 mtime만 바뀜), `git status`/`diff`/`log`/`describe`(파일 편집 직후 포함), 일반 파일 편집 |
-
-  그래서 mtime이 아니라 내용 hash로 비교한다.
+- jj가 쓴 index entry는 stat이 0이다(`git ls-files --debug`의 `mtime: 0:0`). `git status`/`diff`는 그런 entry 가운데 내용이 같은 것의 stat을 채워 index 내용을 바꾼다. 처음 구현은 "index 내용 hash가 바뀌었고 그 사이에 jj op가 없으면 git"으로 판정했는데, `jj commit` 직후 `echo z >> f; git status`에서 오탐이 났다. 그래서 path 단위 교집합으로 바꿨다.
 
 **pre snapshot을 추가해서 얻는 것:**
 - 복구 지점이 정확히 "이 명령 직전"이 된다.
 - 사용자가 turn 사이에 직접 편집한 내용도 복구 지점에 포함된다.
 - 그 사이의 op가 모두 이 명령 때문에 생긴 것이 되므로, 어떤 명령이 원인인지 정확히 특정할 수 있다.
+- 신호 2의 B(명령 직전 tree)를 정확히 구할 수 있다.
 
 **보호 범위:** 보호 대상은 명령이 시작되기 전의 상태다. 이 상태는 pre snapshot이 보장한다. 같은 명령 안에서 만든 변경을 그 명령이 다시 버리는 경우(예: `sed -i … f && git checkout -- f`)는 보호 대상이 아니다. 그건 명령 자체의 의도다. git은 커밋되지 않은 변경을 명시적인 폐기 명령(`checkout --`, `restore`, `reset --hard`, `stash`, `clean`)으로만 덮어쓰고, jj로 같은 명령을 짜도 결과는 같다.
 
 **남는 한계:**
+- **오탐:** 같은 명령 안에서 파일을 git이 아닌 방법(`sed`, `jj restore`, `jj abandon` 등)으로 index 내용(`@-`)으로 되돌리고, 그 뒤에 git이 그 파일을 읽으면 A∩B에 들어간다. 이 경우 알림만 나가고 아무것도 되돌리지 않는다. 알림에 path 목록과 "직접 되돌렸다면 무시하라"는 안내가 있어서 agent가 판단할 수 있다.
+- **비용:** Bash 호출마다 index 사본을 만든다. clone을 지원하지 않는 filesystem에서는 실제로 복사한다. `git ls-files --debug`와 `jj diff`는 index hash가 바뀐 경우에만 실행한다.
 - `git clean`: jj가 snapshot한 파일은 git index에 내용 없는 entry로 올라가 있다. 그래서 `git clean -fd`는 이 파일들을 지우지 않는다(구현 중 실험으로 확인했다). 지워지는 것은 snapshot 뒤 같은 명령 안에서 새로 만든 파일, 그리고 `-x`로 지정한 ignored 파일뿐이다. 앞의 것은 명령의 의도이고, 뒤의 것은 jj도 추적하지 않는다.
 - `jj op restore`는 그 명령이 한 정상적인 변경도 함께 되돌린다. 그래서 agent에게 먼저 확인하라고 안내한다.
 - Bash 호출마다 jj snapshot이 한 번 더 돈다. 큰 repo라면 watchman을 권장한다(README에 이미 있음).
@@ -131,4 +142,3 @@ jj-agent-marketplace/
 1. Codex marketplace 출력을 켤 것인가?
 2. 원격 저장소에 publish할 계획: `tagPattern`과 jj bookmark/tag 운영 방식.
 
-[^mixed]: 강한 신호 2는 그 사이에 parent를 바꾸는 jj op(예: `jj commit`)가 없을 때만 쓸 수 있다. 그런 jj op가 있으면 index 변화가 jj 때문인지 git 때문인지 구분할 수 없다. 그래서 `jj commit -m wip && ./script.sh`처럼 한 명령 안에 jj op와 "스크립트 안에서 working copy만 바꾸는 git"이 함께 있으면 감지하지 못한다. 이런 조합은 드물고, 감지하지 못해도 명령 시작 전 상태는 pre snapshot으로 복구할 수 있다. 그래서 한계로 다루지 않는다.

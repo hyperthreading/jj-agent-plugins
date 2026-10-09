@@ -16,11 +16,13 @@ SESSION_ID=$(json_get session_id)
 
 # Read the baseline and the git index before any jj command below can touch them.
 bf=$(baseline_file "$(json_get tool_use_id)")
-broot= bop= bidx= idx_now=
+broot= bop= bidx= filled=
 if [ -f "$bf" ]; then
   { IFS= read -r broot; IFS= read -r bop; IFS= read -r bidx; } < "$bf"
-  rm -f "$bf"
-  idx_now=$(index_hash "$broot")
+  if [ -n "$bidx" ] && [ -f "$bf.index" ] && [ "$(index_hash "$broot")" != "$bidx" ]; then
+    filled=$(git_filled_paths "$broot" "$bf.index")
+  fi
+  rm -f "$bf" "$bf.index"
 fi
 
 # Cheap exit before anything else when no candidate is inside a jj repo.
@@ -34,7 +36,7 @@ if command -v jj >/dev/null 2>&1; then
     [ -n "$r" ] || continue
     (cd "$r" && { jj util snapshot >/dev/null 2>&1 || jj st >/dev/null 2>&1; })
   done
-  [ -n "$broot" ] && report=$(git_report "$broot" "$bop" "$bidx" "$idx_now" "$(tool_input_get command)")
+  [ -n "$broot" ] && report=$(git_report "$broot" "$bop" "$filled")
 fi
 
 msg="$NEW_CONTEXT${NEW_CONTEXT:+${report:+ }}$report"

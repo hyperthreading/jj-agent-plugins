@@ -2,7 +2,7 @@
 # PreToolUse (Bash)
 # Only acts inside jj repos; elsewhere it exits after a directory walk.
 # Snapshot right before the command, so `jj op log` holds the state it started from, and record a
-# baseline (operation id, git index hash) for post-tool.sh to detect git changes the command makes.
+# baseline (operation id, git index hash and a copy of the index) for post-tool.sh to detect git changes the command makes.
 # Never blocks or rewrites the command: Codex has no way to put the git shim on PATH, so detection
 # after the fact is the guard there (and a backstop behind the shim in Claude Code).
 HOOK_INPUT=$(cat)
@@ -19,4 +19,5 @@ op=$(current_op "$root")
 bf=$(baseline_file "$(json_get tool_use_id)")
 mkdir -p "$(dirname "$bf")" 2>/dev/null
 printf '%s\n%s\n%s\n' "$root" "$op" "$(index_hash "$root")" > "$bf"
+save_index "$root" "$bf.index" || rm -f "$bf.index"
 exit 0

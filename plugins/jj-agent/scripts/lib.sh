@@ -11,15 +11,6 @@ json_get() {
   fi
 }
 
-# A string field of tool_input (falls back to the first match anywhere without jq).
-tool_input_get() {
-  if command -v jq >/dev/null 2>&1; then
-    printf '%s' "$HOOK_INPUT" | jq -r --arg k "$1" '.tool_input[$k]? // empty | strings' 2>/dev/null
-  else
-    json_get "$1"
-  fi
-}
-
 json_str() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | awk 'BEGIN{ORS="\\n"} {print}' | sed 's/\\n$//'; }
 
 # Print the jj workspace root containing $1 (walks up looking for .jj; no jj process). Fails if none.
@@ -59,9 +50,32 @@ baseline_file() {
     "$(printf '%s' "${1:-${SESSION_ID:-default}}" | tr -c 'A-Za-z0-9_-' '_')"
 }
 
-# Content hash of the colocated git index (empty if none). jj snapshots only touch its mtime;
-# git commands that rewrite working-copy files (checkout --, restore, stash, reset) change its content.
+# Content hash of the colocated git index (empty if none), to skip the per-path check when unchanged.
 index_hash() { [ -f "$1/.git/index" ] && cksum < "$1/.git/index" | awk '{print $1 "-" $2}'; }
+
+# Copy the git index of repo $1 to $2 (copy-on-write where the filesystem supports it).
+save_index() {
+  [ -f "$1/.git/index" ] || return 1
+  cp -c "$1/.git/index" "$2" 2>/dev/null || cp --reflink=auto "$1/.git/index" "$2" 2>/dev/null ||
+    cp "$1/.git/index" "$2" 2>/dev/null
+}
+
+# "path<TAB>stat" for each entry of index file $2 (absolute) in repo $1.
+index_stats() {
+  GIT_INDEX_FILE=$2 git -C "$1" -c core.quotePath=false ls-files --debug 2>/dev/null |
+    awk '/^[^ ]/ { if (p != "") print p "\t" s; p = $0; s = ""; next }
+         { gsub(/\t/, " "); s = s $0 }
+         END { if (p != "") print p "\t" s }'
+}
+
+# Paths whose stat git filled in since index copy $2 was taken. jj writes index entries with a
+# zeroed stat; git fills it only for entries whose file matches the index: when it refreshes
+# (status, describe) and when it rewrites the file (checkout --, restore, stash, reset).
+# Read the current index before any jj command runs: importing a moved HEAD rewrites it.
+git_filled_paths() {
+  awk -F'\t' 'NR == FNR { pre[$1] = $2; next } $2 !~ /mtime: 0:0/ && pre[$1] != $2 { print $1 }' \
+    <(index_stats "$1" "$2") <(index_stats "$1" "$1/.git/index")
+}
 
 current_op() { (cd "$1" && jj op log --ignore-working-copy --no-graph -n 1 -T 'id' 2>/dev/null); }
 
@@ -73,31 +87,26 @@ ops_since() {
     awk -F'\t' -v b="$2" '$1 == b { for (i = 1; i <= n; i++) print a[i]; exit } { a[++n] = $2 }'
 }
 
-# Does the command text run a git subcommand that changes state?
-git_writes_in() {
-  printf '%s' "$1" | grep -Eq '(^|[^[:alnum:]_./-])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+(add|am|apply|checkout|cherry-pick|clean|commit|merge|mv|pull|rebase|reset|restore|revert|rm|stash|switch)([^[:alnum:]-]|$)'
-}
-
-# Print a report if git changed repo $1 between baseline op $2 (index hash $3) and now (index hash
-# $4, read before any jj command ran). $5 is the command text. Call after snapshotting.
+# Print a report if git changed repo $1 since baseline op $2. $3 lists the paths whose index stat
+# git filled in (git_filled_paths). Call after snapshotting.
 git_report() {
-  local root=$1 op=$2 idx0=$3 idx1=$4 cmd=$5 ops why='' short
+  local root=$1 op=$2 filled=$3 why='' files ignore='' short
   [ -n "$op" ] || return 0
-  ops=$(ops_since "$root" "$op")
-  [ -n "$ops" ] || return 0
-  if printf '%s\n' "$ops" | grep -q '^import git '; then
-    why='git moved HEAD or refs'
-  elif [ -n "$idx0" ] && [ "$idx0" != "$idx1" ] &&
-    ! printf '%s\n' "$ops" | grep -qv '^snapshot working copy$'; then
-    # Only snapshots in between, so no jj command of the agent's rewrote the index: git did.
-    why='git rewrote working-copy files (the git index changed)'
-  elif git_writes_in "$cmd" && printf '%s\n' "$ops" | grep -q '^snapshot working copy$'; then
-    why='the command ran git and files changed'
+  ops_since "$root" "$op" | grep -q '^import git ' && why='git moved HEAD or refs'
+  if [ -n "$filled" ]; then
+    # Of the paths git filled in, the ones whose content changed during the command: git wrote
+    # them. A refresh alone leaves content unchanged; an edit leaves the stat unfilled.
+    files=$( (cd "$root" && jj diff --ignore-working-copy --from "at_operation($op, @)" --to @ --name-only 2>/dev/null) |
+      grep -Fx -f <(printf '%s\n' "$filled") | head -n 20 | tr '\n' ' ' | sed 's/ $//')
+    if [ -n "$files" ]; then
+      why="${why:+$why; }git rewrote these files: $files"
+      ignore=' If you put those files back yourself (e.g. with jj restore), ignore this.'
+    fi
   fi
   [ -n "$why" ] || return 0
   short=$(printf '%s' "$op" | cut -c1-12)
-  printf 'jj-agent: %s in %s during the last command. The repo state from just before it is jj operation %s. Check what happened with `jj op log -n 5` and `jj op show <op-id>`. If it was not intended: `jj op restore %s` returns the whole repo to that state (this also undoes everything else the command did), or `jj restore --from '"'"'at_operation(%s, @)'"'"' <paths>` restores single files. Use jj instead of git in this repo (jj skill).' \
-    "$why" "$root" "$short" "$short" "$short"
+  printf 'jj-agent: during the last command in %s, %s. The repo state from just before it is jj operation %s.%s Check with `jj op log -n 5` and `jj op show <op-id>`, then restore files with `jj restore --from '"'"'at_operation(%s, @)'"'"' <paths>`, or the whole repo with `jj op restore %s` (this also undoes everything else the command did). Use jj instead of git in this repo (jj skill).' \
+    "$root" "$why" "$short" "$ignore" "$short" "$short"
 }
 
 # Emit additionalContext for hook event $1 with text $2.
