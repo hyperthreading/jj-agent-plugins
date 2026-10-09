@@ -109,6 +109,17 @@ jj-agent-marketplace/
 **남는 한계:**
 - **오탐:** 같은 명령 안에서 파일을 git이 아닌 방법(`sed`, `jj restore`, `jj abandon` 등)으로 index 내용(`@-`)으로 되돌리고, 그 뒤에 git이 그 파일을 읽으면 A∩B에 들어간다. 이 경우 알림만 나가고 아무것도 되돌리지 않는다. 알림에 path 목록과 "직접 되돌렸다면 무시하라"는 안내가 있어서 agent가 판단할 수 있다.
 - **비용:** Bash 호출마다 index 사본을 만든다. clone을 지원하지 않는 filesystem에서는 실제로 복사한다. `git ls-files --debug`와 `jj diff`는 index hash가 바뀐 경우에만 실행한다.
+- **측정 (`tests/hooks-bench.sh`, macOS, jj 0.46, median ms, git shim 없는 PATH):**
+
+  | repo | pre | post | post+git | v0.2.0 post |
+  |---|---|---|---|---|
+  | jj repo 아님 | 46 | 96 | – | 84 |
+  | 10 files | 91 | 110 | 92 | 68 |
+  | 5,000 files | 99 | 118 | 118 | – |
+  | 30,000 files | 131 | 150 | 264 | 105 |
+
+  - jj repo 안의 Bash 호출 한 번에 pre와 post를 합쳐 약 200~280ms가 든다. v0.2.0은 post만 약 70~105ms였다.
+  - jj repo 밖에서도 약 140ms가 든다. 원인 대부분은 고정 비용이다: bash 시작(MacPorts bash 15ms, `/bin/bash`는 3ms), 필드마다 따로 띄우는 jq(약 10ms씩), `dirname`으로 상위 디렉터리를 찾는 루프, jj 프로세스(약 20~25ms씩).
 - `git clean`: jj가 snapshot한 파일은 git index에 내용 없는 entry로 올라가 있다. 그래서 `git clean -fd`는 이 파일들을 지우지 않는다(구현 중 실험으로 확인했다). 지워지는 것은 snapshot 뒤 같은 명령 안에서 새로 만든 파일, 그리고 `-x`로 지정한 ignored 파일뿐이다. 앞의 것은 명령의 의도이고, 뒤의 것은 jj도 추적하지 않는다.
 - `jj op restore`는 그 명령이 한 정상적인 변경도 함께 되돌린다. 그래서 agent에게 먼저 확인하라고 안내한다.
 - Bash 호출마다 jj snapshot이 한 번 더 돈다. 큰 repo라면 watchman을 권장한다(README에 이미 있음).
