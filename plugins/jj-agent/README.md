@@ -26,20 +26,40 @@ The report names the operation from just before the command, plus `jj restore --
 
 ## Install
 
-Claude Code, as a plugin:
+The repo is a plugin marketplace (`yejun-jj`) that both Claude Code and Codex read: [hyperthreading/jj-agent-plugins](https://github.com/hyperthreading/jj-agent-plugins).
+
+**Claude Code** (user scope, every repo):
 
 ```bash
-claude plugin marketplace add /path/to/jj-agent-marketplace
+claude plugin marketplace add hyperthreading/jj-agent-plugins
 claude plugin install jj-agent@yejun-jj
 ```
 
-Claude Code or Codex, with [APM](https://microsoft.github.io/apm/) (installs for whichever of the two the project targets):
+Restart the session afterwards: hooks are read at session start (`/reload-plugins` does not pick up new hooks). To update: `claude plugin marketplace update yejun-jj`, then `claude plugin update jj-agent@yejun-jj`, then restart.
+
+**Codex** (user scope, every repo):
 
 ```bash
-apm install /path/to/jj-agent-marketplace/plugins/jj-agent
+codex plugin marketplace add hyperthreading/jj-agent-plugins
+codex plugin add jj-agent@yejun-jj
 ```
 
-To try it in Claude Code without installing: `claude --plugin-dir /path/to/jj-agent-marketplace/plugins/jj-agent`.
+Codex reads the same marketplace and plugin files and loads both the hooks and the `jj` skill. It does not trust plugin hooks automatically: review and trust them with `/hooks`. To update: `codex plugin marketplace upgrade yejun-jj`, then `codex plugin add jj-agent@yejun-jj` again.
+
+**Per project with [APM](https://microsoft.github.io/apm/)** (Claude Code and Codex, pinned in the project's `apm.lock.yaml`):
+
+```bash
+apm install hyperthreading/jj-agent-plugins/plugins/jj-agent
+```
+
+It installs for whichever of `claude` and `codex` the project targets: hooks into `.claude/settings.json` and `.codex/hooks.json` with their scripts under `.claude/hooks/` and `.codex/hooks/`, and the skill into `.claude/skills/` and `.agents/skills/`. Commit these files to share the setup with a team, or ignore them. Use either the plugin or APM for a given agent, not both, or the hooks run twice.
+
+**Try it in Claude Code without installing:**
+
+```bash
+git clone https://github.com/hyperthreading/jj-agent-plugins
+claude --plugin-dir jj-agent-plugins/plugins/jj-agent
+```
 
 Requirements:
 - `jj` on `PATH`.
@@ -56,8 +76,8 @@ jj bookmark track main@origin   # for each remote branch you pull, if jj suggest
 ```
 
 - `.git` stays as it is and `.jj` is added next to it (git ignores it). Branches become bookmarks, the checked-out branch becomes the parent of the working-copy change `@`, and uncommitted changes carry over into `@`.
-- Claude Code (plugin installed at user scope) picks the repo up without a restart: at the next prompt or tool call it tells the agent the repo is now jj.
-- Codex needs the package in each repo: `apm install /path/to/jj-agent-marketplace/plugins/jj-agent`. It writes `.codex/`, `.agents/skills/`, `apm.yml` and `apm.lock.yaml` into the repo; commit or ignore them. Trust the hooks with `/hooks` in Codex.
+- With the plugin installed (Claude Code or Codex), there is nothing to install per repo. The repo is picked up without a restart: at the next prompt or tool call the agent is told it is now jj.
+- With APM instead, run `apm install hyperthreading/jj-agent-plugins/plugins/jj-agent` in the repo (see Install).
 - You keep using git, your IDE and `gh` as before; only the agent's git is guarded. jj keeps git's HEAD detached at `@-`, so `git status` may show a detached HEAD. jj imports whatever you do with git at its next command.
 - To go back to plain git, delete `.jj`. Commits you made only through jj and never put on a bookmark do not become git branches, so set a bookmark on any you want to keep first.
 
@@ -65,7 +85,7 @@ Without `.jj` (plain git repos and other directories) every hook exits silently,
 
 ## Notes
 
-- **Codex:** project hooks run only after the project's `.codex/` layer is trusted and the hooks are reviewed with `/hooks`. APM writes repo-relative hook paths (`.codex/hooks/...`), so start Codex from the repo root.
+- **Codex:** plugin hooks and project hooks run only after you trust them with `/hooks`; project hooks also need the project's `.codex/` layer to be trusted. APM writes repo-relative hook paths (`.codex/hooks/...`), so with an APM install start Codex from the repo root.
 - **Several shims on PATH:** after a plugin update a resumed session can have the old and the new shim directory on `PATH`. Each shim skips every shim copy when looking for the real git.
 - **Escape hatch for humans:** `JJ_SHIM_OFF=1 <command>` runs real git, for example for a release script that commits. The skill tells the agent not to use it.
 - **The shim affects only Claude Code's Bash tool.** Your terminal is untouched.

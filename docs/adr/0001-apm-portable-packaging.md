@@ -146,13 +146,14 @@ jj-agent-marketplace/
 | Claude Code (plugin) | `claude plugin marketplace add <repo>` → `claude plugin install jj-agent@yejun-jj` | 지금과 같다. `${CLAUDE_PLUGIN_ROOT}` 기준으로 동작한다 |
 | Claude Code (APM) | `apm install <owner>/<repo>/plugins/jj-agent` | `.claude/settings.json`과 `.claude/hooks/jj-agent/`에 설치된다 |
 | Codex (APM) | 위와 같은 명령 | `.codex/hooks.json`, `.codex/hooks/jj-agent/`, `.agents/skills/`에 설치된다. Codex의 `/hooks`에서 trust가 필요하다 |
+| Codex (plugin) | `codex plugin marketplace add hyperthreading/jj-agent-plugins` → `codex plugin add jj-agent@yejun-jj` | Codex가 `.claude-plugin/marketplace.json`과 plugin 폴더를 그대로 읽는다. hooks와 skill이 모두 동작하고, 격리된 `CODEX_HOME`에서 `codex exec`로 확인했다. plugin hook도 `/hooks`에서 trust해야 한다 |
 
 `session-start.sh`의 shim 경로는 `CLAUDE_PLUGIN_ROOT`에 의존하지 않고 `$(dirname "$0")/shim`으로 찾는다. 그러면 plugin 설치와 APM 설치 모두에서 shim을 찾을 수 있다.
 
 ### 4. 지금 하지 않는 것
 
 - Gemini, Copilot, Cursor adapter. 필요해지면 그때 별도 package(`target:` 지정)로 만든다.
-- Codex plugin marketplace(`.agents/plugins/marketplace.json`) 출력. APM marketplace block에서 `codex: {}`를 켜기만 하면 되므로 Open question으로 둔다.
+- Codex 전용 marketplace 출력(`.agents/plugins/marketplace.json`). Codex 0.159가 `.claude-plugin/marketplace.json`을 그대로 읽어서 필요 없다.
 
 ## Consequences
 
@@ -163,6 +164,6 @@ jj-agent-marketplace/
 
 ## Open questions
 
-1. Codex marketplace 출력을 켤 것인가?
+1. ~~Codex marketplace 출력을 켤 것인가?~~ 필요 없다. Codex가 Claude 형식의 marketplace와 plugin을 읽는다(위 설치 경로 표 참고).
 2. 원격 저장소에 publish할 계획: `tagPattern`과 jj bookmark/tag 운영 방식.
 
