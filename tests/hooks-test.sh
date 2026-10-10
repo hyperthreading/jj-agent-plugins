@@ -67,7 +67,7 @@ user_turn() { # shell snippet run in $repo
   hook_input UserPromptSubmit "$repo" x x x | PATH=$hook_path $HB "$P/user-prompt.sh" >/dev/null
 }
 
-reason() { printf '%s' "$OUT" | sed -n 's/.*jj-agent: during the last command in [^,]*, \(.*\)\. The repo state.*/\1/p'; }
+reason() { printf '%s' "$OUT" | sed -n 's/.*jj-agent: during the command `.*` that you just ran in [^,]*, \(.*\)\. The repo state.*/\1/p'; }
 
 expect() { # name expected-reason ('' = no report)
   local got; got=$(reason)
@@ -96,6 +96,7 @@ run_suite() { # label hook-PATH
   call "echo y >> f && git checkout -- f";              expect "command discards its own edit (by design)" ""
   user_turn "echo z >> f"
   call "./reset-f.sh";                                  expect "git checkout -- inside a script" "git rewrote these files: f"
+  case $OUT in *'jj-agent: during the command `./reset-f.sh` that you just ran in '*) ok "the report names the command" ;; *) bad "the report names the command" "got [$OUT]" ;; esac
   op=$(printf '%s' "$OUT" | sed -n 's/.*jj op restore \([0-9a-f]*\).*/\1/p')
   (cd "$repo" && jj restore --from "at_operation($op, @)" f >/dev/null 2>&1)
   if tail -n 1 "$repo/f" | grep -qx z; then ok "reported jj restore --from brings the file back"; else bad "reported jj restore --from brings the file back" "f ends with [$(tail -n 1 "$repo/f")]"; fi
@@ -120,8 +121,29 @@ run_suite() { # label hook-PATH
   echo m >> "$repo/f"   # someone else edits in the middle of a turn: no UserPromptSubmit
   call "./reset-f.sh";                                  expect "edit by someone else mid-turn (known gap: not protected)" ""
 
+  call "for i in \$(seq 55); do jj describe -m d\$i; done; git commit -q --allow-empty -m many"
+  expect "git commit after 55 jj operations in the same command" "git moved HEAD or refs"
+
+  # File tools reach PreToolUse too (for the Muse hold); outside Muse they are ignored there.
+  r=$(printf '{"session_id":"test","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Write","tool_use_id":"w1","tool_input":{"file_path":"%s/f","content":"x"}}' "$(json_esc "$repo")" "$(json_esc "$repo")" |
+      PATH=$hook_path $HB "$P/pre-tool.sh" 2>&1)
+  [ -z "$r" ] && [ ! -e "$CLAUDE_PLUGIN_DATA/baselines/w1" ] && ok "PreToolUse for Write: silent, no baseline" || bad "PreToolUse for Write: silent, no baseline" "got [$r]"
+
   r=$(ls "$CLAUDE_PLUGIN_DATA/baselines" 2>/dev/null | wc -l | tr -d ' ')
   [ "$r" = 0 ] && ok "no baselines left behind" || bad "no baselines left behind" "$r left"
+  [ ! -e "$CLAUDE_PLUGIN_DATA/pending" ] && ok "no Muse hold outside Muse" || bad "no Muse hold outside Muse" "$(ls -R "$CLAUDE_PLUGIN_DATA/pending")"
+
+  # .git is a "gitdir:" file (git worktree, --separate-git-dir): the index is found through it.
+  local sep="$tmp/$label/sep repo"
+  mkdir -p "$sep"
+  (cd "$sep" && git init -q --separate-git-dir="$tmp/$label/sep.git" && jj git init --colocate >/dev/null 2>&1 &&
+    echo a > f && printf '#!/bin/sh\ngit checkout -- f\n' > reset-f.sh && chmod +x reset-f.sh && jj commit -m base >/dev/null 2>&1) ||
+    bad "$label: gitdir-file setup" "failed"
+  local main_repo=$repo
+  repo=$sep
+  user_turn "echo z >> f"
+  call "./reset-f.sh";                                  expect ".git is a gitdir: file" "git rewrote these files: f"
+  repo=$main_repo
 
   # Outside a jj repo: no output, nothing written.
   local data2=$tmp/$label/data-plain
@@ -146,6 +168,91 @@ r=$(cd "$tmp" && PATH="$tmp/shim-new:$tmp/shim-old:$PATH" perl -e 'alarm 5; exec
 case $r in "git version"*) ok "two shims on PATH still reach real git" ;; *) bad "two shims on PATH still reach real git" "got [$r]" ;; esac
 r=$(cd "$tmp/full-path/my repo" && PATH="$tmp/shim-new:$PATH" JJ_SHIM_OFF= git commit -qm x 2>&1)
 case $r in *"Blocked: this is a jj"*) ok "shim blocks git commit in a jj repo" ;; *) bad "shim blocks git commit in a jj repo" "got [$r]" ;; esac
+
+echo "== muse code (notice inside a tool result, next state-changing call held once)"
+m=$tmp/muse-repo; mkdir -p "$m"
+(cd "$m" && jj git init >/dev/null 2>&1 && echo a > f && printf '#!/bin/sh\ngit checkout -- f\n' > r.sh && chmod +x r.sh &&
+  jj commit -m base >/dev/null 2>&1 && echo keep >> f && jj util snapshot >/dev/null 2>&1) || bad "muse repo setup" "failed"
+muse_post() { # tool_use_id tool_response -> MOUT (stdout), MERR (stderr), MRC
+  printf '{"hook_event_name":"PostToolUse","tool_name":"bash","tool_input":{"command":"./r.sh"},"tool_use_id":"%s","tool_response":"%s","session_id":"test","cwd":"%s"}' "$1" "$2" "$m" |
+    MUSE_PLUGIN_ID=jj-agent CLAUDE_PLUGIN_DATA=$tmp/data-muse $HB "$P/post-tool.sh" > "$tmp/m.out" 2> "$tmp/m.err"
+  MRC=$?; MOUT=$(cat "$tmp/m.out"); MERR=$(cat "$tmp/m.err")
+}
+hook_input UserPromptSubmit "$m" m1 x x | MUSE_PLUGIN_ID=jj-agent CLAUDE_PLUGIN_DATA=$tmp/data-muse $HB "$P/user-prompt.sh" >/dev/null
+printf '{"hook_event_name":"PreToolUse","tool_name":"bash","tool_input":{"command":"true"},"tool_use_id":"mu1","session_id":"test","cwd":"%s"}' "$m" |
+  MUSE_PLUGIN_ID=jj-agent CLAUDE_PLUGIN_DATA=$tmp/data-muse $HB "$P/pre-tool.sh"
+muse_post mu1 '{\n  \"exit_code\": 0,\n  \"output\": \"hello\"\n}'
+[ "$MRC" = 0 ] && [ -z "$MOUT$MERR" ] && ok "nothing to report: silent, exit 0" || bad "nothing to report: silent, exit 0" "rc=$MRC out=[$MOUT] err=[$MERR]"
+printf '{"hook_event_name":"PreToolUse","tool_name":"bash","tool_input":{"command":"./r.sh"},"tool_use_id":"mu2","session_id":"test","cwd":"%s"}' "$m" |
+  MUSE_PLUGIN_ID=jj-agent CLAUDE_PLUGIN_DATA=$tmp/data-muse $HB "$P/pre-tool.sh"
+(cd "$m" && ./r.sh) >/dev/null 2>&1
+muse_post mu2 '{\n  \"exit_code\": 0,\n  \"output\": \"hello\"\n}'
+want_head=$(printf '{\n  "exit_code": 0,\n  "output": "hello"\n}\n\njj-agent: during the command `./r.sh` that you just ran in ')
+[ "$MRC" = 2 ] && [ -z "$MOUT" ] && ok "git change: exit 2, nothing on stdout" || bad "git change: exit 2, nothing on stdout" "rc=$MRC out=[$MOUT]"
+case $MERR in "$want_head"*"git rewrote these files: f"*) ok "stderr = original tool result, blank line, report" ;; *) bad "stderr = original tool result, blank line, report" "got [$MERR]" ;; esac
+muse_pre() { # tool_use_id tool_name command -> MOUT
+  printf '{"hook_event_name":"PreToolUse","tool_name":"%s","tool_input":{"command":"%s"},"tool_use_id":"%s","session_id":"test","cwd":"%s"}' "$2" "$3" "$1" "$m" |
+    MUSE_PLUGIN_ID=jj-agent CLAUDE_PLUGIN_DATA=$tmp/data-muse $HB "$P/pre-tool.sh" > "$tmp/m.out" 2>&1
+  MOUT=$(cat "$tmp/m.out")
+}
+muse_fail() { # tool_use_id [no-pre]: run ./r.sh as a failed call -> MOUT, MERR, MRC
+  if [ -z "${2:-}" ]; then
+    echo keep >> "$m/f"; (cd "$m" && jj util snapshot) >/dev/null 2>&1
+    muse_pre "$1" bash ./r.sh
+  fi
+  (cd "$m" && ./r.sh) >/dev/null 2>&1
+  printf '{"hook_event_name":"PostToolUseFailure","tool_name":"bash","tool_input":{"command":"./r.sh"},"tool_use_id":"%s","error":"exit 3","session_id":"test","cwd":"%s"}' "$1" "$m" |
+    MUSE_PLUGIN_ID=jj-agent CLAUDE_PLUGIN_DATA=$tmp/data-muse $HB "$P/post-tool.sh" > "$tmp/m.out" 2> "$tmp/m.err"
+  MRC=$?; MOUT=$(cat "$tmp/m.out"); MERR=$(cat "$tmp/m.err")
+}
+held() { case $MOUT in *'"permissionDecision":"deny"'*) return 0 ;; esac; return 1; }
+pending=$tmp/data-muse/pending/test
+
+[ "$(head -n 1 "$pending" 2>/dev/null)" = delivered ] && ok "the notice is kept as delivered" || bad "the notice is kept as delivered" "$(cat "$pending" 2>&1)"
+muse_pre mu3 edit_file ""
+held && case $MOUT in *'the result of `./r.sh` reports that git changed this repo'*) true ;; *) false ;; esac &&
+  ok "next state-changing call is held, pointing at that result" || bad "next state-changing call is held, pointing at that result" "got [$MOUT]"
+[ ! -e "$pending" ] && ok "held once: the notice is cleared" || bad "held once: the notice is cleared" "still there"
+muse_pre mu4 edit_file ""
+! held && ok "the call after that runs" || bad "the call after that runs" "got [$MOUT]"
+
+echo keep >> "$m/f"; (cd "$m" && jj util snapshot) >/dev/null 2>&1
+muse_pre mu5 bash ./r.sh; (cd "$m" && ./r.sh) >/dev/null 2>&1
+muse_post mu5 '{\n  \"exit_code\": 0,\n  \"output\": \"hello\"\n}'
+muse_pre mu6 bash "jj op log -n 5"
+! held && [ ! -e "$pending" ] && ok "after a delivered notice, a jj command runs and clears it" || bad "after a delivered notice, a jj command runs and clears it" "got [$MOUT]"
+rm -f "$tmp/data-muse/baselines/mu6"
+
+muse_fail mu7
+[ "$MRC" = 0 ] && [ -z "$MOUT$MERR" ] && ok "failed call: silent, result untouched" || bad "failed call: silent, result untouched" "rc=$MRC out=[$MOUT] err=[$MERR]"
+[ "$(head -n 1 "$pending" 2>/dev/null)" = undelivered ] && ok "failed call: the notice is kept as undelivered" || bad "failed call: the notice is kept as undelivered" "$(cat "$pending" 2>&1)"
+muse_pre mu8 bash "jj op log -n 5"
+held && case $MOUT in *'during the command `./r.sh` that you ran earlier in '*'git rewrote these files: f'*) true ;; *) false ;; esac &&
+  ok "undelivered: even a jj command is held, and gets the whole notice" || bad "undelivered: even a jj command is held, and gets the whole notice" "got [$MOUT]"
+[ ! -e "$tmp/data-muse/baselines/mu8" ] && ok "a held call records no baseline" || bad "a held call records no baseline" "baseline exists"
+muse_pre mu9 bash "jj op log -n 5"
+! held && ok "the next call runs" || bad "the next call runs" "got [$MOUT]"
+rm -f "$tmp/data-muse/baselines/mu9"
+
+# Two calls of one batch pass PreToolUse before either finishes, then both fail.
+echo keep >> "$m/f"; (cd "$m" && jj util snapshot) >/dev/null 2>&1
+muse_pre mu10 bash ./r.sh; muse_pre mu11 bash ./r.sh
+muse_fail mu10 no-pre; muse_fail mu11 no-pre
+muse_pre mu12 bash "echo done >> log.txt"
+n_notes=$(printf '%s' "$MOUT" | grep -o 'git rewrote these files' | wc -l | tr -d ' ')
+[ "$n_notes" = 2 ] && ok "two failed calls: both notices delivered together" || bad "two failed calls: both notices delivered together" "got $n_notes in [$MOUT]"
+if command -v python3 >/dev/null 2>&1; then
+  printf '%s' "$MOUT" | python3 -c 'import json,sys; d=json.load(sys.stdin)["hookSpecificOutput"]; assert d["permissionDecision"]=="deny" and d["permissionDecisionReason"]' 2>/dev/null &&
+    ok "the hold is valid PreToolUse JSON" || bad "the hold is valid PreToolUse JSON" "got [$MOUT]"
+fi
+
+echo keep >> "$m/f"; (cd "$m" && jj util snapshot) >/dev/null 2>&1
+muse_pre mu13 bash ./r.sh; (cd "$m" && ./r.sh) >/dev/null 2>&1
+big=$(printf '%*s' 17000 '' | tr ' ' x)
+muse_post mu13 '{\n  \"exit_code\": 0,\n  \"output\": \"'"$big"'\"\n}'
+[ "$MRC" = 0 ] && [ -z "$MOUT$MERR" ] && [ "$(head -n 1 "$pending" 2>/dev/null)" = undelivered ] &&
+  ok "result over 16 KiB: left as it is, the notice goes to the next call" || bad "result over 16 KiB: left as it is, the notice goes to the next call" "rc=$MRC err=${#MERR} bytes, pending=$(head -n 1 "$pending" 2>&1)"
+rm -f "$pending"
 
 echo "== no .jj (plain git repo, plain directory)"
 # Where there is no .jj the plugin must be inert: every hook silent, nothing written, no jj repo
