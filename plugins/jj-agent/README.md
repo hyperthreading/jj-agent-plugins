@@ -1,6 +1,6 @@
 # jj-agent
 
-Make coding agents use [Jujutsu](https://jj-vcs.github.io/jj/) instead of git, **only in jj repos**. Works with Claude Code (and its subagents) and Codex.
+Make coding agents use [Jujutsu](https://jj-vcs.github.io/jj/) instead of git, **only in jj repos**. Works with Claude Code (and its subagents), Codex and Muse Code.
 
 The plugin is opt-in per repository: a directory with `.jj/` (from `jj git init` or `jj git clone`) opts in. Everywhere else it does nothing. A repo converted in the middle of a session is picked up without a restart.
 
@@ -9,7 +9,7 @@ The plugin is opt-in per repository: a directory with `.jj/` (from `jj git init`
 | `skills/jj` | How to use jj without thinking much: a fixed task loop, an intent→command table, conflict and push recipes, and a `--help` fallback with a legacy→current command map. Verified against jj 0.46. |
 | `scripts/shim/git` | Claude Code only. A `git` wrapper first on the Bash tool's `PATH`. Outside jj repos it hands everything straight to git. Inside a jj repo it lets through calls made by jj itself and read-only git (`rev-parse`, `ls-files`, ...). It blocks anything that changes state and prints the jj equivalent. It checks for `.jj` on every call, so it starts guarding as soon as a repo is converted. |
 | `SessionStart` | Claude Code: puts the shim on `PATH` via `CLAUDE_ENV_FILE`. Both: if the session starts in a jj repo, tells the agent so. |
-| `PreToolUse` (Bash) | In jj repos only: records the latest operation and a copy of the git index (copy-on-write where possible). It does not snapshot: the previous tool call and the turn start already did. Never blocks or rewrites the command. |
+| `PreToolUse` (Bash, Edit, Write) | Bash in jj repos only: records the latest operation and a copy of the git index (copy-on-write where possible). It does not snapshot: the previous tool call and the turn start already did. Never rewrites the command. In Muse Code it also holds one call after a git-change report (see below); elsewhere the file tools pass straight through. |
 | `PostToolUse`, `PostToolUseFailure` (Bash) | In jj repos only: snapshots after each edit or command (Claude Code reports a command that exits non-zero as a failure, so both are hooked), so each step lands in `jj op log`. After a Bash command it reports git changes with the operation to restore (see below). The first time the agent touches a jj repo in a session (it ran `jj git init`, or `cd`'d into one), it tells the agent once. |
 | `UserPromptSubmit` | In jj repos only: snapshots, so what you changed between turns (in an editor or your own terminal) is recorded before the agent acts. Also catches a repo converted between turns and tells the agent once. |
 
@@ -22,7 +22,7 @@ Codex has no way for a hook to change `PATH` for later commands, so the shim can
 - **git moved HEAD or refs** (`git commit`, `reset`, `checkout <branch>`, ...): jj records an `import git head`/`import git refs` operation.
 - **git rewrote files** (`git checkout -- <path>`, `restore`, `stash`, `reset --hard`): the file's content changed during the command, and git filled in its index entry. jj writes index entries with an empty stat; git fills one in only when the file matches the index. That happens when git rewrites the file, and also when `git status` refreshes an unchanged file. A file that changed and was filled in was therefore written by git. This also catches git called from scripts, and the report lists the files.
 
-The report names the operation from just before the command, plus `jj restore --from 'at_operation(<op>, @)' <paths>` (single files) and `jj op restore <op>` (whole repo). One known false alarm: within one command, a file is put back to its `@-` content without git (`jj restore`, `sed`) and git then reads it. The report says to ignore it in that case. One known gap: a file someone else edits while the agent is in the middle of a turn is not in the starting state, so git overwriting it is neither reported nor recoverable. In Claude Code this backs up the shim. See [ADR 0001](../../docs/adr/0001-apm-portable-packaging.md) for the design and its limits.
+The report names the command and the operation from just before it, plus `jj restore --from 'at_operation(<op>, @)' <paths>` (single files) and `jj op restore <op>` (whole repo). One known false alarm: within one command, a file is put back to its `@-` content without git (`jj restore`, `sed`) and git then reads it. The report says to ignore it in that case. One known gap: a file someone else edits while the agent is in the middle of a turn is not in the starting state, so git overwriting it is neither reported nor recoverable. It also works when `.git` is a `gitdir:` file (a git worktree, `--separate-git-dir`). In Claude Code this backs up the shim. See [ADR 0001](../../docs/adr/0001-apm-portable-packaging.md) for the design and its limits, and [ADR 0003](../../docs/adr/0003-detector-fixes.md) for later fixes.
 
 ## Install
 
@@ -45,6 +45,20 @@ codex plugin add jj-agent@yejun-jj
 ```
 
 Codex reads the same marketplace and plugin files and loads both the hooks and the `jj` skill. It does not trust plugin hooks automatically: review and trust them with `/hooks`. To update: `codex plugin marketplace upgrade yejun-jj`, then `codex plugin add jj-agent@yejun-jj` again.
+
+**Muse Code** (user scope):
+
+```bash
+muse plugins marketplace add yejun-jj hyperthreading/jj-agent-plugins
+muse plugins install jj-agent@yejun-jj
+muse plugins approve jj-agent
+```
+
+Muse loads the hooks only after `approve`. There is no shim (as in Codex). Muse adds hook context to the first developer message, ahead of the conversation, where the model misses it or takes it for something from before the session. So the git-change report goes into a tool result instead:
+- after a command that succeeded, it comes back inside that command's result, after the original output;
+- after a command that failed (or whose output is too big to repeat), the next Bash, Edit or Write call is held and the report is its result.
+
+Either way the next state-changing call is held once, so a call the model queued together with the command cannot run before it has looked. A `jj` command right after a delivered report is let through. See [ADR 0002](../../docs/adr/0002-muse-code-support.md).
 
 **Per project with [APM](https://microsoft.github.io/apm/)** (Claude Code and Codex, pinned in the project's `apm.lock.yaml`):
 

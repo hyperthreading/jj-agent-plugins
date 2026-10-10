@@ -25,6 +25,9 @@ find "${SF%/*}" -type f -mtime +14 -exec rm -f {} + 2>/dev/null
 # Baselines left behind by Bash calls whose PostToolUse never ran (interrupted, denied).
 baseline_path x
 find "${BF%/*}" -type f -mtime +1 -exec rm -f {} + 2>/dev/null
+# Muse Code notices held for a session that never made another state-changing call.
+pending_path
+find "${PF%/*}" -type f -mtime +1 -exec rm -f {} + 2>/dev/null
 
 json_get cwd cwd
 scan_dirs "${cwd:-${CLAUDE_PROJECT_DIR:-$PWD}}"

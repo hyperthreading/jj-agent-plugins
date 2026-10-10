@@ -1,10 +1,10 @@
 # jj-agent-plugins
 
-Make coding agents (Claude Code and Codex) use [Jujutsu](https://jj-vcs.github.io/jj/) instead of git, **only in jj repos**. Everywhere else the plugin does nothing.
+Make coding agents (Claude Code, Codex and Muse Code) use [Jujutsu](https://jj-vcs.github.io/jj/) instead of git, **only in jj repos**. Everywhere else the plugin does nothing.
 
 - **Skill:** a non-interactive jj workflow the agent follows for every version-control action.
 - **Git guard:** in Claude Code, a `git` shim on the agent's `PATH` blocks git commands that change state and names the jj equivalent.
-- **Snapshots and git-change reports:** each edit and command lands in `jj op log`. When git changes the repo anyway (from a script, or in Codex where the shim cannot be used), the agent is told what happened and which operation to restore.
+- **Snapshots and git-change reports:** each edit and command lands in `jj op log`. When git changes the repo anyway (from a script, or in Codex and Muse Code where the shim cannot be used), the agent is told what happened and which operation to restore.
 
 ## Install
 
@@ -22,13 +22,21 @@ codex plugin marketplace add hyperthreading/jj-agent-plugins
 codex plugin add jj-agent@yejun-jj
 ```
 
-Per project, for either agent, with [APM](https://microsoft.github.io/apm/):
+Muse Code:
+
+```bash
+muse plugins marketplace add yejun-jj hyperthreading/jj-agent-plugins
+muse plugins install jj-agent@yejun-jj
+muse plugins approve jj-agent
+```
+
+Per project, for Claude Code or Codex, with [APM](https://microsoft.github.io/apm/):
 
 ```bash
 apm install hyperthreading/jj-agent-plugins/plugins/jj-agent
 ```
 
-Restart the agent session after installing. In Codex, trust the hooks with `/hooks`. Needs `jj` on `PATH`.
+Restart the agent session after installing. In Codex, trust the hooks with `/hooks`; in Muse Code, `approve` does that. Needs `jj` on `PATH`.
 
 To use it in a repo, make the repo a jj repo. For an existing git repo:
 
@@ -40,6 +48,8 @@ jj git init
 
 - [plugins/jj-agent/README.md](plugins/jj-agent/README.md): what each part does, using it in an existing git repo, updating, and limits
 - [docs/adr/0001-apm-portable-packaging.md](docs/adr/0001-apm-portable-packaging.md): design decisions (packaging, git guard, change detection)
+- [docs/adr/0002-muse-code-support.md](docs/adr/0002-muse-code-support.md): Muse Code support
+- [docs/adr/0003-detector-fixes.md](docs/adr/0003-detector-fixes.md): git-change detection fixes (gitdir files, long operation logs)
 - [BENCHMARK.md](BENCHMARK.md): hook latency and test environment
 - `tests/`: `hooks-test.sh` (scenarios), `hooks-bench.sh` and `hooks-profile.sh` (latency)
 

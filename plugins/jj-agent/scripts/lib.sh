@@ -1,7 +1,7 @@
 # Shared helpers for jj-agent hooks. Sourced, not executed. bash 3.2 compatible (macOS /bin/bash).
 # Hooks run on every tool call, so the common paths use bash builtins only: no jq, no dirname,
 # no command substitution. Functions return values in variables named by the caller or in
-# globals (JJ_ROOT, SF, BF, GI, CTX, REPORT) instead of printing them.
+# globals (JJ_ROOT, SF, BF, GI, CTX, REPORT, CMD, PF) instead of printing them.
 
 # HOOK_INPUT <- the hook's stdin JSON.
 read_input() { IFS= read -r -d '' HOOK_INPUT || :; }
@@ -148,7 +148,7 @@ git_filled_paths() {
 # Snapshot repo $1 and set REPORT if git changed it since baseline op $2. $3 and $4 are copies of
 # the git index from before and after the command; $4 exists only if the index changed.
 git_report() {
-  local root=$1 op=$2 pre_idx=$3 post_idx=$4 ops newer='' why='' changed filled p files='' n=0 ignore='' short
+  local root=$1 op=$2 pre_idx=$3 post_idx=$4 ops newer='' why='' changed filled p files='' n=0 ignore='' short during
   local paths=()
   REPORT=
   # `jj op log` snapshots the working copy first, so this is also the post-command snapshot.
@@ -186,6 +186,44 @@ __FILLED__
   fi
   [ -n "$why" ] || return 0
   short=${op:0:12}
-  printf -v REPORT 'jj-agent: during the last command in %s, %s. The repo state from just before it is jj operation %s.%s Check with `jj op log -n 5` and `jj op show <op-id>`, then restore files with `jj restore --from '"'"'at_operation(%s, @)'"'"' <paths>`, or the whole repo with `jj op restore %s` (this also undoes everything else the command did). Use jj instead of git in this repo (jj skill).' \
-    "$root" "$why" "$short" "$ignore" "$short" "$short"
+  during='the last command'
+  [ -n "$CMD" ] && during="the command \`$CMD\` that you just ran"
+  printf -v REPORT 'jj-agent: during %s in %s, %s. The repo state from just before it is jj operation %s.%s Check with `jj op log -n 5` and `jj op show <op-id>`, then restore files with `jj restore --from '"'"'at_operation(%s, @)'"'"' <paths>`, or the whole repo with `jj op restore %s` (this also undoes everything else the command did). Use jj instead of git in this repo (jj skill).' \
+    "$during" "$root" "$why" "$short" "$ignore" "$short" "$short"
+}
+
+# CMD <- first line of the tool call's command, at most 200 characters (empty for non-shell tools).
+read_command() {
+  json_get command CMD
+  CMD=${CMD%%$'\n'*}
+  [ ${#CMD} -gt 200 ] && CMD="${CMD:0:200}..."
+}
+
+# --- Muse Code: holding a notice until it reaches a tool result (ADR 0002) ---
+
+# PF <- this session's held notice. Line 1 is "undelivered" (the rest is the text to deliver) or
+# "delivered" (it reached the result of the command on line 2; the next call is held only so that a
+# call queued with that command cannot run before the model has looked).
+pending_path() {
+  local id=${SESSION_ID:-default}
+  PF=${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/jj-agent}/pending/${id//[^A-Za-z0-9_-]/_}
+}
+
+# save_pending STATE TEXT. Undelivered text accumulates; a delivered notice never hides one.
+save_pending() {
+  local old=
+  pending_path
+  [ -d "${PF%/*}" ] || mkdir -p "${PF%/*}" 2>/dev/null
+  [ -f "$PF" ] && { IFS= read -r old; } < "$PF"
+  if [ "$1" = undelivered ]; then
+    if [ "$old" = undelivered ]; then printf '%s\n' "$2" >> "$PF"; else printf 'undelivered\n%s\n' "$2" > "$PF"; fi
+  elif [ "$old" != undelivered ]; then
+    printf 'delivered\n%s\n' "$2" > "$PF"
+  fi
+}
+
+# True if text $1 fits in one Muse hook output stream (16 KiB, counted in bytes) with room to spare.
+fits_hook_stream() {
+  local LC_ALL=C
+  [ ${#1} -lt 16000 ]
 }
