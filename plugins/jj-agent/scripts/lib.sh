@@ -1,7 +1,7 @@
 # Shared helpers for jj-agent hooks. Sourced, not executed. bash 3.2 compatible (macOS /bin/bash).
 # Hooks run on every tool call, so the common paths use bash builtins only: no jq, no dirname,
 # no command substitution. Functions return values in variables named by the caller or in
-# globals (JJ_ROOT, SF, BF, CTX, REPORT) instead of printing them.
+# globals (JJ_ROOT, SF, BF, GI, CTX, REPORT) instead of printing them.
 
 # HOOK_INPUT <- the hook's stdin JSON.
 read_input() { IFS= read -r -d '' HOOK_INPUT || :; }
@@ -63,7 +63,7 @@ mark_announced() {
 # CTX <- the notice for jj root $1.
 context_for() {
   local root=$1 mode=jj ver
-  [ -d "$root/.git" ] && mode=jj-colocated
+  [ -e "$root/.git" ] && mode=jj-colocated
   ver=$(jj --version 2>/dev/null); ver=${ver#jj }; ver=${ver%%-*}; ver=${ver%% *}
   printf -v CTX 'vcs=%s at %s (jj %s). This directory is a Jujutsu repository: use the jj skill for every version-control action in it. Do not run git commands that change state there: they are blocked where possible, and any git change is reported with a recovery point. Read-only git still works, but prefer jj.' \
     "$mode" "$root" "${ver:-not found on PATH}"
@@ -103,14 +103,27 @@ baseline_path() {
   BF=${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/jj-agent}/baselines/${id//[^A-Za-z0-9_-]/_}
 }
 
+# GI <- the git index file of colocated repo $1. .git is a directory, or a file holding
+# "gitdir: <path>" (a git worktree or submodule). Fails if there is no git dir.
+git_index_path() {
+  local l=
+  GI=
+  if [ -d "$1/.git" ]; then GI=$1/.git/index; return 0; fi
+  [ -f "$1/.git" ] || return 1
+  IFS= read -r l < "$1/.git"
+  case $l in 'gitdir: '?*) l=${l#gitdir: } ;; *) return 1 ;; esac
+  case $l in /*) ;; *) l=$1/$l ;; esac
+  GI=$l/index
+}
+
 # Copy the git index of repo $1 to $2 (copy-on-write where the filesystem supports it).
 save_index() {
-  [ -f "$1/.git/index" ] || return 1
+  git_index_path "$1" && [ -f "$GI" ] || return 1
   case $OSTYPE in
-    darwin*) cp -c "$1/.git/index" "$2" 2>/dev/null && return 0 ;;
-    linux*) cp --reflink=auto "$1/.git/index" "$2" 2>/dev/null && return 0 ;;
+    darwin*) cp -c "$GI" "$2" 2>/dev/null && return 0 ;;
+    linux*) cp --reflink=auto "$GI" "$2" 2>/dev/null && return 0 ;;
   esac
-  cp "$1/.git/index" "$2" 2>/dev/null
+  cp "$GI" "$2" 2>/dev/null
 }
 
 # "path<TAB>stat" for entries of index file $2 (absolute) in repo $1, limited to paths $3...
@@ -140,6 +153,10 @@ git_report() {
   REPORT=
   # `jj op log` snapshots the working copy first, so this is also the post-command snapshot.
   ops=$(jj -R "$root" op log --no-graph -n 50 -T 'id ++ "\t" ++ description.first_line() ++ "\n"' 2>/dev/null)
+  # The command made 50+ operations: read the whole log once (already snapshotted above).
+  case $ops in *"$op"*) ;; *)
+    ops=$(jj -R "$root" op log --ignore-working-copy --no-graph -T 'id ++ "\t" ++ description.first_line() ++ "\n"' 2>/dev/null) ;;
+  esac
   case $ops in *"$op"*) newer=${ops%%"$op"*} ;; esac
   case $newer in *$'\t'"import git "*) why='git moved HEAD or refs' ;; esac
   if [ -f "$post_idx" ] && [ -f "$pre_idx" ]; then

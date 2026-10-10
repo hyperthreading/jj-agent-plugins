@@ -24,7 +24,7 @@ broot= bop=
 if [ -f "$BF" ]; then
   { IFS= read -r broot; IFS= read -r bop; } < "$BF"
   # If the git index changed, copy it before any jj command below can rewrite it.
-  if [ -f "$BF.index" ] && ! cmp -s "$BF.index" "$broot/.git/index" 2>/dev/null; then
+  if [ -f "$BF.index" ] && git_index_path "$broot" && ! cmp -s "$BF.index" "$GI" 2>/dev/null; then
     save_index "$broot" "$BF.post"
   fi
 fi
