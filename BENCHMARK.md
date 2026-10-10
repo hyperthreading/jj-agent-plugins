@@ -78,6 +78,23 @@ Bash 호출 1회의 pre와 post를 ms로 적었다. 0.2.0에는 PreToolUse가 �
 | 0.3.0 (`rxntylmr`, perf) | 3 / 3 | 26 / 29 | 64 / 72 | bash 내장 기능으로 파싱, hook마다 jj 1회, `/bin/bash` |
 | 0.3.1 (`lullxlwy`, perf) | 3 / 3 | 23 / 28 | 23 / 68 | pre의 snapshot 제거(`--ignore-working-copy`) |
 
+### 0.3.1 이후: Muse 보류와 감지 보완 (ADR 0002, 0003)
+
+0.3.1과 새 버전을 번갈아 `tests/hooks-bench.sh`(파일 10개, 5,000개, 각 15회)로 두 번씩 쟀다. 측정 중 host load가 7~8로 높아서 위 표보다 값이 크다. 두 버전의 차이는 회차 간 흔들림(±3ms) 안이었다.
+
+| repo | 0.3.1 pre / post | 새 버전 pre / post |
+|---|---|---|
+| 10 files | 25.9 / 31.7, 24.1 / 30.5 | 25.1 / 30.8, 27.1 / 33.7 |
+| 5,000 files | 25.7 / 39.3, 26.6 / 39.4 | 24.8 / 38.2, 27.2 / 40.5 |
+
+새로 생긴 경로는 따로 쟀다(파일 10개, median). 아래 값에는 측정용 wrapper가 프로세스를 띄우는 시간(빈 bash 스크립트 6.2ms)이 들어 있다.
+
+| 경로 | 시간 |
+|---|---|
+| Claude Code·Codex의 Edit/Write PreToolUse (새로 hook이 걸림, 바로 끝남) | 7.2ms |
+| Muse에서 보류 응답을 내는 PreToolUse | 13.4ms |
+| stdout 30 KiB인 Bash 뒤의 PostToolUse (0.3.1 → 새 버전) | 33.5 → 32.5ms |
+
 ## 설계 판단에 쓴 측정
 
 ### 셸 시작

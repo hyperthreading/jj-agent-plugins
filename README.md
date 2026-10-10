@@ -46,6 +46,7 @@ jj git init
 
 ## Docs
 
+- [docs/DESIGN.md](docs/DESIGN.md): the whole design in one page (components, per-agent behavior, detection, Muse delivery, state, what was ruled out)
 - [plugins/jj-agent/README.md](plugins/jj-agent/README.md): what each part does, using it in an existing git repo, updating, and limits
 - [docs/adr/0001-apm-portable-packaging.md](docs/adr/0001-apm-portable-packaging.md): design decisions (packaging, git guard, change detection)
 - [docs/adr/0002-muse-code-support.md](docs/adr/0002-muse-code-support.md): Muse Code support
