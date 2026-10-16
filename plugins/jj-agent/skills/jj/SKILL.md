@@ -32,14 +32,19 @@ jj config set --repo ui.conflict-marker-style git    # conflict markers you alre
 ## Task loop (default workflow)
 
 ```bash
-jj st                       # 1. Start: if @ already has changes that are not yours → jj new
+jj st                       # 1. Start: look at @, then name it after the task
+jj describe -m "<task>"     #    @ is (empty): describe it
+jj new -m "<task>"          #    @ has changes (an earlier task's, or not yours): start on top
 # ... edit files ...        # 2. Work: edits go into @ automatically
-jj commit -m "feat: ..."    # 3. Done: describe @ and open a fresh empty @ on top
+jj commit -m "feat: ..."    # 3. Done: final message for @, and a fresh empty @ on top
 ```
 
+- Describe before working, so every snapshot of the work is recorded under the task: `jj evolog` lists them.
+- Choose by whether `@` is empty, not by whether it has a description. An empty `@` left by a task that edited nothing gets re-described; `jj new` on top of an empty `@` leaves an empty commit behind.
 - The finished change is `@-`. An empty, undescribed `@` on top of it is normal.
-- Do not run `jj new` at the start "just in case". On top of an empty `@` it leaves an empty commit behind.
-- For several logical steps, repeat steps 2–3 once per step.
+- Several tasks in a row, or several logical steps in one task: repeat 1–3 for each.
+- A small fix to the task just finished is not a new task: make it in the empty `@`, then `jj squash -u`.
+- Parallel tasks share one working copy and mix their edits in `@`. Give each its own `jj workspace add <path>`.
 
 ## Intent → command
 
@@ -109,6 +114,7 @@ jj op restore <op-id>              # return the whole repo to the state after <o
 - `jj undo` undoes the latest operation. Repeated calls walk further back, and `jj redo` re-applies.
 - The latest operation may be an automatic "snapshot working copy" rather than your command. Read `jj op log` first and prefer `jj op restore <op-id>`.
 - Restore only to undo your own operations from this session. Ask the user before restoring past anything you did not do.
+- `jj evolog -r <id>` lists every recorded state of one change. With jj-agent's hooks, `jj op log` shows on each snapshot the step that made it (`args: ... --config 'jj-agent.step=...'`).
 - **"jj-agent: during the last command ..., git ..."**: git changed the repo, possibly from inside a script you ran. If you put those files back yourself (e.g. `jj restore`), ignore it. The message names the operation from just before that command. Run `jj op show` on the operations after it to see what changed. If the change was not intended, restore single files with `jj restore --from 'at_operation(<op>, @)' <paths>`, or the whole repo with `jj op restore <op>`; the latter also drops everything else that command did. Then redo the step with jj.
 
 ## Fallback
