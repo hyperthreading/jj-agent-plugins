@@ -14,7 +14,7 @@ coding agent(Claude Code, Codex, Muse Code)가 jj repo에서는 git 대신 jj를
 ## 원칙
 
 - **jj repo에서만 동작한다.** 각 hook은 `.jj`를 찾아 디렉터리를 거슬러 올라가는 것으로 시작한다. 없으면 jj 프로세스를 띄우지 않고 바로 끝난다. repo를 `jj git init`으로 바꾸는 순간부터 동작한다. 세션 중간이어도 같다.
-- **jj를 쓰게 하는 것은 skill이다.** 차단과 감지는 그 뒤를 받친다.
+- **jj를 쓰게 하는 것은 skill이다.** 차단과 감지는 그 뒤를 받친다. agent가 skill을 잘 따른다면 hook 없이 skill만 담은 `plugins/jj-skill`을 대신 설치할 수 있다. skill 파일은 두 plugin에 같은 내용으로 복사해 두고 `tests/skill-sync-test.sh`로 확인한다. symlink는 plugin cache 복사, APM, Windows checkout에서의 동작을 보장할 수 없어서 쓰지 않는다.
 - **명령을 고쳐 쓰지 않는다.** 명령 문자열을 분석해서 막지 않고, 명령 전후의 실제 상태를 비교한다. 그래야 스크립트 안의 git도 잡히고, agent의 승인 규칙이나 화면 표시에 영향을 주지 않는다.
 - **stable component를 조합한다.** jj의 public 명령(`op log`, `diff`, `util snapshot`, `at_operation()`), git의 public 명령(`ls-files --debug`), 각 agent의 public hook protocol만 쓴다. 상태 저장소나 daemon을 새로 만들지 않는다.
 - **hook은 Bash 호출마다 돈다.** 그래서 bash 내장 기능으로 입력을 파싱하고, jj 프로세스는 hook당 하나만 띄운다. 목표는 Bash 호출 1회에 100ms 미만이다.
