@@ -4,7 +4,7 @@ Make coding agents (Claude Code, Codex and Muse Code) use [Jujutsu](https://jj-v
 
 - **Skill:** a non-interactive jj workflow the agent follows for every version-control action.
 - **Git guard:** in Claude Code, a `git` shim on the agent's `PATH` blocks git commands that change state and names the jj equivalent.
-- **Snapshots and git-change reports:** each edit and command lands in `jj op log`. When git changes the repo anyway (from a script, or in Codex and Muse Code where the shim cannot be used), the agent is told what happened and which operation to restore.
+- **Snapshots and git-change reports:** each edit and command lands in `jj op log`, named by the step that made it, under a change the agent describes with its task. When git changes the repo anyway (from a script, or in Codex and Muse Code where the shim cannot be used), the agent is told what happened and which operation to restore.
 
 ## Install
 
@@ -54,6 +54,7 @@ jj git init
 - [docs/adr/0001-apm-portable-packaging.md](docs/adr/0001-apm-portable-packaging.md): design decisions (packaging, git guard, change detection)
 - [docs/adr/0002-muse-code-support.md](docs/adr/0002-muse-code-support.md): Muse Code support
 - [docs/adr/0003-detector-fixes.md](docs/adr/0003-detector-fixes.md): git-change detection fixes (gitdir files, long operation logs)
+- [docs/adr/0004-step-names-in-snapshots.md](docs/adr/0004-step-names-in-snapshots.md): task and step names in snapshots, and the Codex approval experiment
 - [BENCHMARK.md](BENCHMARK.md): hook latency and test environment
 - `tests/`: `hooks-test.sh` (scenarios), `hooks-bench.sh` and `hooks-profile.sh` (latency), `skill-sync-test.sh` (the two skill copies match)
 

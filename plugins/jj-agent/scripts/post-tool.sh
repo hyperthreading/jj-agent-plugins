@@ -38,11 +38,37 @@ scan_dirs "$fdir" "$cwd" ${broot:+"$broot"}
 read_command
 REPORT=
 if command -v jj >/dev/null 2>&1; then
+  # Name the step in its snapshot: a shell command by the tool's description (Claude Code's Bash
+  # tool has one) or its first line, a file tool by the file, a Codex patch by the files it touches.
+  json_get tool_name tool
+  step=$CMD_FULL
+  if [[ $step = '*** Begin Patch'* ]]; then
+    rest=$step step=
+    re=$'\n''\*\*\* (Add|Update|Delete) File: ([^'$'\n'']*)'
+    while [ ${#step} -le 100 ] && [[ $rest =~ $re ]]; do
+      p=${BASH_REMATCH[2]}
+      for r in "${JJ_ROOTS[@]}"; do case $p in "$r"/*) p=${p#"$r"/}; break ;; esac; done
+      step="${step:+$step, }$p"
+      rest=${rest#*"${BASH_REMATCH[0]}"}
+    done
+    step="${tool:-apply_patch}: $step"
+  elif [ -n "$step" ]; then
+    json_get description desc
+    step="${tool:-Bash}: ${desc:-$step}"
+  else
+    step=${tool:-edit}
+    if [ -n "$file" ]; then
+      rel=$file
+      for r in "${JJ_ROOTS[@]}"; do case $file in "$r"/*) rel=${file#"$r"/}; break ;; esac; done
+      step="$step $rel"
+    fi
+  fi
+  step_args "$step"
   for r in "${JJ_ROOTS[@]}"; do
     if [ "$r" = "$broot" ] && [ -n "$bop" ]; then
       git_report "$broot" "$bop" "$BF.index" "$BF.post"   # snapshots as part of it
     else
-      jj -R "$r" util snapshot >/dev/null 2>&1
+      snapshot "$r"
     fi
   done
 fi

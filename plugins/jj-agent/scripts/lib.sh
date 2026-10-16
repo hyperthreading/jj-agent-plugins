@@ -151,8 +151,10 @@ git_report() {
   local root=$1 op=$2 pre_idx=$3 post_idx=$4 ops newer='' why='' changed filled p files='' n=0 ignore='' short during
   local paths=()
   REPORT=
-  # `jj op log` snapshots the working copy first, so this is also the post-command snapshot.
-  ops=$(jj -R "$root" op log --no-graph -n 50 -T 'id ++ "\t" ++ description.first_line() ++ "\n"' 2>/dev/null)
+  # `jj op log` snapshots the working copy first, so this is also the post-command snapshot (named
+  # by STEP_ARGS).
+  ops=$(jj -R "$root" op log --no-graph -n 50 -T 'id ++ "\t" ++ description.first_line() ++ "\n"' "${STEP_ARGS[@]}" 2>/dev/null) ||
+    ops=$(jj -R "$root" op log --no-graph -n 50 -T 'id ++ "\t" ++ description.first_line() ++ "\n"' 2>/dev/null)
   # The command made 50+ operations: read the whole log once (already snapshotted above).
   case $ops in *"$op"*) ;; *)
     ops=$(jj -R "$root" op log --ignore-working-copy --no-graph -T 'id ++ "\t" ++ description.first_line() ++ "\n"' 2>/dev/null) ;;
@@ -193,10 +195,50 @@ __FILLED__
 }
 
 # CMD <- first line of the tool call's command, at most 200 characters (empty for non-shell tools).
+# CMD_FULL <- the whole command.
 read_command() {
-  json_get command CMD
-  CMD=${CMD%%$'\n'*}
+  json_get command CMD_FULL
+  CMD=${CMD_FULL%%$'\n'*}
   [ ${#CMD} -gt 200 ] && CMD="${CMD:0:200}..."
+}
+
+# --- Naming the step in the snapshot it triggers ---
+
+# clip VAR TEXT MAX: VAR <- the first line of TEXT, at most MAX bytes, with "..." where it was cut.
+# Cuts at a character boundary: jj rejects an argument that is not valid UTF-8.
+clip() {
+  local LC_ALL=C _cs=$2 _cc= _ci=1 _cb
+  case $_cs in *$'\n'*) _cs=${_cs%%$'\n'*}; _cc=1 ;; esac
+  _cs=${_cs//$'\r'/}
+  if [ ${#_cs} -gt "$3" ]; then
+    _cs=${_cs:0:$3}; _cc=1
+    # Drop a character the cut split: find its lead byte among the last 3 bytes.
+    while [ $_ci -le 3 ] && [ $_ci -le ${#_cs} ]; do
+      _cb=${_cs:${#_cs}-$_ci:1}
+      case $_cb in
+        [$'\x80'-$'\xbf']) _ci=$((_ci + 1)); continue ;;
+        [$'\xc0'-$'\xdf']) [ $_ci -lt 2 ] && _cs=${_cs:0:${#_cs}-$_ci} ;;
+        [$'\xe0'-$'\xef']) [ $_ci -lt 3 ] && _cs=${_cs:0:${#_cs}-$_ci} ;;
+        [$'\xf0'-$'\xf7']) _cs=${_cs:0:${#_cs}-$_ci} ;;
+      esac
+      break
+    done
+  fi
+  printf -v "$1" '%s%s' "$_cs" "${_cc:+...}"
+}
+
+# STEP_ARGS <- jj arguments naming step $1 (at most 100 bytes). jj records each command's
+# arguments with the operation, so the snapshot this command makes shows the step in `jj op log`
+# ("args: ... jj-agent.step=...") and `jj evolog`. jj reads an unknown config key and ignores it.
+step_args() {
+  local _step
+  clip _step "$1" 100
+  STEP_ARGS=(--config "jj-agent.step=$_step")
+}
+
+# Snapshot repo $1, naming the step if STEP_ARGS is set. Snapshots without it if jj refuses it.
+snapshot() {
+  jj -R "$1" util snapshot "${STEP_ARGS[@]}" >/dev/null 2>&1 || jj -R "$1" util snapshot >/dev/null 2>&1
 }
 
 # --- Muse Code: holding a notice until it reaches a tool result (ADR 0002) ---

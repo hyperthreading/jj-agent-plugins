@@ -27,9 +27,9 @@ ok()  { pass=$((pass + 1)); printf '  ok    %s\n' "$1"; }
 bad() { fail=$((fail + 1)); printf '  FAIL  %s\n        %s\n' "$1" "$2"; }
 
 json_esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
-hook_input() { # event cwd tool_use_id tool_name command
-  printf '{"session_id":"test","cwd":"%s","hook_event_name":"%s","tool_name":"%s","tool_use_id":"%s","tool_input":{"command":"%s"}}' \
-    "$(json_esc "$2")" "$1" "$4" "$3" "$(json_esc "$5")"
+hook_input() { # event cwd tool_use_id tool_name command [more tool_input JSON, e.g. ,"description":"x"]
+  printf '{"session_id":"test","cwd":"%s","hook_event_name":"%s","tool_name":"%s","tool_use_id":"%s","tool_input":{"command":"%s"%s}}' \
+    "$(json_esc "$2")" "$1" "$4" "$3" "$(json_esc "$5")" "${6:-}"
 }
 
 # A minimal PATH without jq or any git shim: the hooks must not depend on either.
@@ -49,14 +49,14 @@ make_nojq_path() {
 
 # Run one tool call against $repo: pre hook (Bash only), the command, post hook. Sets OUT to the
 # additionalContext text (empty if none). post_event is PostToolUseFailure for a failed command.
-call() { # command [tool_name] [post_event]
-  local cmd=$1 tn=${2:-Bash} ev=${3:-PostToolUse} out
+call() { # command [tool_name] [post_event] [more tool_input JSON]
+  local cmd=$1 tn=${2:-Bash} ev=${3:-PostToolUse} more=${4:-} out
   n=$((n + 1))
   if [ "$tn" = Bash ]; then
-    hook_input PreToolUse "$repo" "tu$n" "$tn" "$cmd" | PATH=$hook_path $HB "$P/pre-tool.sh"
+    hook_input PreToolUse "$repo" "tu$n" "$tn" "$cmd" "$more" | PATH=$hook_path $HB "$P/pre-tool.sh"
   fi
   (cd "$repo" && eval "$cmd") >/dev/null 2>&1
-  out=$(hook_input "$ev" "$repo" "tu$n" "$tn" "$cmd" | PATH=$hook_path $HB "$P/post-tool.sh")
+  out=$(hook_input "$ev" "$repo" "tu$n" "$tn" "$cmd" "$more" | PATH=$hook_path $HB "$P/post-tool.sh")
   RAW=$out
   OUT=$(printf '%s' "$out" | sed -n 's/.*"additionalContext":"\(.*\)"}}$/\1/p')
 }
@@ -65,6 +65,18 @@ call() { # command [tool_name] [post_event]
 user_turn() { # shell snippet run in $repo
   (cd "$repo" && eval "$1") >/dev/null 2>&1
   hook_input UserPromptSubmit "$repo" x x x | PATH=$hook_path $HB "$P/user-prompt.sh" >/dev/null
+}
+
+# The step named in the newest operation's arguments, or "none". The hooks put it last:
+# args: jj ... --config 'jj-agent.step=<step>'   (jj writes a ' inside it as \')
+last_step() {
+  local a q="'"
+  a=$(jj -R "$repo" op log -n 1 --ignore-working-copy --no-graph -T 'attributes' 2>/dev/null)
+  case $a in *"jj-agent.step="*) a=${a#*jj-agent.step=}; a=${a%$q}; printf '%s' "${a//\\$q/$q}" ;; *) printf none ;; esac
+}
+expect_step() { # name expected-step
+  local got; got=$(last_step)
+  if [ "$got" = "$2" ]; then ok "$1"; else bad "$1" "expected step [$2], got [$got]"; fi
 }
 
 reason() { printf '%s' "$OUT" | sed -n 's/.*jj-agent: during the command `.*` that you just ran in [^,]*, \(.*\)\. The repo state.*/\1/p'; }
@@ -123,6 +135,30 @@ run_suite() { # label hook-PATH
 
   call "for i in \$(seq 55); do jj describe -m d\$i; done; git commit -q --allow-empty -m many"
   expect "git commit after 55 jj operations in the same command" "git moved HEAD or refs"
+
+  # Each snapshot names its step in the operation's arguments (jj op log "args:").
+  call "echo n1 >> g" Bash PostToolUse ',"description":"Append a line to g"'
+  expect_step "step: the Bash tool's description" "Bash: Append a line to g"
+  call "echo n2 >> g"
+  expect_step "step: no description, the command" "Bash: echo n2 >> g"
+  call "$(printf "sed -i.bak -e 's/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/' g && echo n3 >> g\\nrm -f g.bak")"
+  expect_step "step: a long multi-line command is cut to 100 bytes" \
+    "Bash: sed -i.bak -e 's/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb..."
+  call "echo n4 >> g" Bash PostToolUse ',"description":"가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사"'
+  expect_step "step: cut at a character boundary (jj rejects broken UTF-8)" \
+    "Bash: 가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다..."
+  file_tool() { # tool_input JSON: a file tool's PostToolUse (no PreToolUse, no command run)
+    printf '{"session_id":"test","cwd":"%s","hook_event_name":"PostToolUse","tool_name":"%s","tool_use_id":"e1","tool_input":%s}' "$(json_esc "$repo")" "$1" "$2" |
+      PATH=$hook_path $HB "$P/post-tool.sh" >/dev/null
+  }
+  echo n5 >> "$repo/g"
+  file_tool apply_patch '{"command":"*** Begin Patch\n*** Update File: g\n@@\n+n5\n*** Add File: sub/new.txt\n+x\n*** End Patch\n"}'
+  expect_step "step: Codex patch, by the files it touches" "apply_patch: g, sub/new.txt"
+  echo n6 >> "$repo/h"
+  file_tool Edit '{"file_path":"'"$(json_esc "$repo")"'/h","old_string":"a","new_string":"b"}'
+  expect_step "step: file tool, by the path in the repo" "Edit h"
+  user_turn "echo n7 >> h"
+  expect_step "step: UserPromptSubmit snapshot" "changes made between turns"
 
   # File tools reach PreToolUse too (for the Muse hold); outside Muse they are ignored there.
   r=$(printf '{"session_id":"test","cwd":"%s","hook_event_name":"PreToolUse","tool_name":"Write","tool_use_id":"w1","tool_input":{"file_path":"%s/f","content":"x"}}' "$(json_esc "$repo")" "$(json_esc "$repo")" |
