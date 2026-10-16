@@ -51,31 +51,31 @@ The report names the command and the operation from just before it, plus `jj res
 
 ## Install
 
-The repo is a plugin marketplace (`yejun-jj`) that both Claude Code and Codex read: [hyperthreading/jj-agent-plugins](https://github.com/hyperthreading/jj-agent-plugins).
+The repo is a plugin marketplace (`hyperthreading`) that both Claude Code and Codex read: [hyperthreading/jj-agent-plugins](https://github.com/hyperthreading/jj-agent-plugins).
 
 **Claude Code** (user scope, every repo):
 
 ```bash
 claude plugin marketplace add hyperthreading/jj-agent-plugins
-claude plugin install jj-agent@yejun-jj
+claude plugin install jj-agent@hyperthreading
 ```
 
-Restart the session afterwards: hooks are read at session start (`/reload-plugins` does not pick up new hooks). To update: `claude plugin marketplace update yejun-jj`, then `claude plugin update jj-agent@yejun-jj`, then restart.
+Restart the session afterwards: hooks are read at session start (`/reload-plugins` does not pick up new hooks). To update: `claude plugin marketplace update hyperthreading`, then `claude plugin update jj-agent@hyperthreading`, then restart.
 
 **Codex** (user scope, every repo):
 
 ```bash
 codex plugin marketplace add hyperthreading/jj-agent-plugins
-codex plugin add jj-agent@yejun-jj
+codex plugin add jj-agent@hyperthreading
 ```
 
-Codex reads the same marketplace and plugin files and loads both the hooks and the `jj` skill. It does not trust plugin hooks automatically: review and trust them with `/hooks`. To update: `codex plugin marketplace upgrade yejun-jj`, then `codex plugin add jj-agent@yejun-jj` again.
+Codex reads the same marketplace and plugin files and loads both the hooks and the `jj` skill. It does not trust plugin hooks automatically: review and trust them with `/hooks`. To update: `codex plugin marketplace upgrade hyperthreading`, then `codex plugin add jj-agent@hyperthreading` again.
 
 **Muse Code** (user scope):
 
 ```bash
-muse plugins marketplace add yejun-jj hyperthreading/jj-agent-plugins
-muse plugins install jj-agent@yejun-jj
+muse plugins marketplace add hyperthreading hyperthreading/jj-agent-plugins
+muse plugins install jj-agent@hyperthreading
 muse plugins approve jj-agent
 ```
 
@@ -84,6 +84,21 @@ Muse loads the hooks only after `approve`. There is no shim (as in Codex). Muse 
 - after a command that failed (or whose output is too big to repeat), the next Bash, Edit or Write call is held and the report is its result.
 
 Either way the next state-changing call is held once, so a call the model queued together with the command cannot run before it has looked. A `jj` command right after a delivered report is let through. See [ADR 0002](../../docs/adr/0002-muse-code-support.md).
+
+**Installed from `yejun-jj`?** The marketplace used to be called `yejun-jj`. Updating keeps the old name, so remove it and add it again (removing the marketplace also removes its plugins):
+
+```bash
+claude plugin marketplace remove yejun-jj
+claude plugin marketplace add hyperthreading/jj-agent-plugins
+claude plugin install jj-agent@hyperthreading
+
+codex plugin remove jj-agent@yejun-jj
+codex plugin marketplace remove yejun-jj
+codex plugin marketplace add hyperthreading/jj-agent-plugins
+codex plugin add jj-agent@hyperthreading
+```
+
+In Muse Code, add the marketplace again under the name `hyperthreading` and install from it. Use `jj-skill` in place of `jj-agent` if that is what you installed.
 
 **Per project with [APM](https://microsoft.github.io/apm/)** (Claude Code and Codex, pinned in the project's `apm.lock.yaml`):
 

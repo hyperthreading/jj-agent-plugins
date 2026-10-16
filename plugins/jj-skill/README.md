@@ -19,27 +19,27 @@ Install one of jj-skill and jj-agent, not both: jj-agent already contains the sk
 
 ## Install
 
-The plugin is in the `yejun-jj` marketplace: [hyperthreading/jj-agent-plugins](https://github.com/hyperthreading/jj-agent-plugins).
+The plugin is in the `hyperthreading` marketplace: [hyperthreading/jj-agent-plugins](https://github.com/hyperthreading/jj-agent-plugins).
 
 **Claude Code:**
 
 ```bash
 claude plugin marketplace add hyperthreading/jj-agent-plugins
-claude plugin install jj-skill@yejun-jj
+claude plugin install jj-skill@hyperthreading
 ```
 
 **Codex:**
 
 ```bash
 codex plugin marketplace add hyperthreading/jj-agent-plugins
-codex plugin add jj-skill@yejun-jj
+codex plugin add jj-skill@hyperthreading
 ```
 
 **Muse Code:**
 
 ```bash
-muse plugins marketplace add yejun-jj hyperthreading/jj-agent-plugins
-muse plugins install jj-skill@yejun-jj
+muse plugins marketplace add hyperthreading hyperthreading/jj-agent-plugins
+muse plugins install jj-skill@hyperthreading
 ```
 
 **Per project with [APM](https://microsoft.github.io/apm/):**
