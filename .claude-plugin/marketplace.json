@@ -8,13 +8,13 @@
     {
       "name": "jj-agent",
       "description": "Make coding agents use Jujutsu (jj) instead of git: workflow skill, git guard, and per-step snapshots",
-      "version": "0.3.2",
+      "version": "0.4.0",
       "source": "./plugins/jj-agent"
     },
     {
       "name": "jj-skill",
       "description": "The jj workflow skill alone, without hooks: for agents that follow the skill without a git guard",
-      "version": "0.3.2",
+      "version": "0.4.0",
       "source": "./plugins/jj-skill"
     }
   ]
