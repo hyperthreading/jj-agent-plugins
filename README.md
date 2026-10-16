@@ -12,21 +12,21 @@ Claude Code:
 
 ```bash
 claude plugin marketplace add hyperthreading/jj-agent-plugins
-claude plugin install jj-agent@yejun-jj
+claude plugin install jj-agent@hyperthreading
 ```
 
 Codex:
 
 ```bash
 codex plugin marketplace add hyperthreading/jj-agent-plugins
-codex plugin add jj-agent@yejun-jj
+codex plugin add jj-agent@hyperthreading
 ```
 
 Muse Code:
 
 ```bash
-muse plugins marketplace add yejun-jj hyperthreading/jj-agent-plugins
-muse plugins install jj-agent@yejun-jj
+muse plugins marketplace add hyperthreading hyperthreading/jj-agent-plugins
+muse plugins install jj-agent@hyperthreading
 muse plugins approve jj-agent
 ```
 
@@ -38,7 +38,9 @@ apm install hyperthreading/jj-agent-plugins/plugins/jj-agent
 
 Restart the agent session after installing. In Codex, trust the hooks with `/hooks`; in Muse Code, `approve` does that. Needs `jj` on `PATH`.
 
-**Skill only:** if the agent follows the skill well enough without a git guard or snapshots, install `jj-skill` instead of `jj-agent` (same commands with `jj-skill@yejun-jj`, or `apm install hyperthreading/jj-agent-plugins/plugins/jj-skill`). It has no hooks, so there is nothing to trust or approve. See [plugins/jj-skill/README.md](plugins/jj-skill/README.md) for what it leaves out. Install one of the two, not both.
+Installed from the old `yejun-jj` marketplace? See [moving to `hyperthreading`](plugins/jj-agent/README.md#install).
+
+**Skill only:** if the agent follows the skill well enough without a git guard or snapshots, install `jj-skill` instead of `jj-agent` (same commands with `jj-skill@hyperthreading`, or `apm install hyperthreading/jj-agent-plugins/plugins/jj-skill`). It has no hooks, so there is nothing to trust or approve. See [plugins/jj-skill/README.md](plugins/jj-skill/README.md) for what it leaves out. Install one of the two, not both.
 
 To use it in a repo, make the repo a jj repo. For an existing git repo:
 
