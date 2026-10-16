@@ -10,6 +10,7 @@ json_get cwd cwd; cwd=${cwd:-$PWD}
 find_jj_root "$cwd" || exit 0
 json_get session_id SESSION_ID
 scan_dirs "$cwd"
-command -v jj >/dev/null 2>&1 && jj -R "$JJ_ROOT" util snapshot >/dev/null 2>&1
+step_args 'changes made between turns'
+command -v jj >/dev/null 2>&1 && snapshot "$JJ_ROOT"
 [ -n "$NEW_CONTEXT" ] && emit_context UserPromptSubmit "$NEW_CONTEXT"
 exit 0

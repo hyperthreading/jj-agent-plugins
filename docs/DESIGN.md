@@ -9,6 +9,7 @@ coding agent(Claude Code, Codex, Muse Code)가 jj repo에서는 git 대신 jj를
 | [ADR 0001](adr/0001-apm-portable-packaging.md) | 패키징(plugin, APM), git shim, git 변경 감지 알고리즘 |
 | [ADR 0002](adr/0002-muse-code-support.md) | Muse Code 지원과 알림 전달 방식, 그 실험 |
 | [ADR 0003](adr/0003-detector-fixes.md) | 감지 보완(gitdir 파일, 긴 op log)과 가져오지 않은 제안 |
+| [ADR 0004](adr/0004-step-names-in-snapshots.md) | snapshot에 task와 step 이름 남기기, Codex 명령 접두어 실험 |
 | [BENCHMARK.md](../BENCHMARK.md) | hook 지연, 단계별 비용, 측정 환경 |
 
 ## 원칙
@@ -41,7 +42,7 @@ plugins/jj-agent/
 | SessionStart | shim을 PATH에 넣는다(Claude Code). 세션이 jj repo에서 시작하면 그 사실을 알린다. 오래된 상태 파일을 지운다 |
 | UserPromptSubmit | snapshot한다. 사용자가 turn 사이에 바꾼 것을 agent가 움직이기 전에 기록해 둔다. turn 사이에 jj repo가 된 곳도 여기서 알린다 |
 | PreToolUse | Bash 명령 전에 baseline(마지막 op id와 git index 사본)을 남긴다. Muse에서는 보류된 알림이 있으면 이 호출을 한 번 막는다 |
-| PostToolUse, PostToolUseFailure | 매 편집과 명령 뒤에 snapshot해서 각 단계가 `jj op log`에 남게 한다. Bash 명령 뒤에는 git 변경을 판정하고 알린다 |
+| PostToolUse, PostToolUseFailure | 매 편집과 명령 뒤에 snapshot해서 각 단계가 `jj op log`에 남게 한다. snapshot op에는 그 단계의 이름(`jj-agent.step`)이 붙는다. Bash 명령 뒤에는 git 변경을 판정하고 알린다 |
 
 ## agent별 동작
 
@@ -61,11 +62,19 @@ APM으로 설치할 수 있는 target은 `claude`, `codex`로 제한한다. 다�
 2. **명령 실행.**
 3. **PostToolUse 또는 PostToolUseFailure:**
    1. 어떤 jj 명령보다 먼저 현재 git index를 baseline 사본과 비교한다(`cmp`). 다르면 지금 index도 복제한다. 다음 단계의 jj가 index를 다시 쓰기 때문이다.
-   2. `jj op log -n 50`을 실행한다. 이 명령이 snapshot과 op 목록 읽기를 한 번에 한다. baseline op가 그 안에 없으면 전체 log를 한 번 더 읽는다.
+   2. `jj op log -n 50 --config 'jj-agent.step=<step>'`을 실행한다. 이 명령이 snapshot과 op 목록 읽기를 한 번에 한다. jj가 명령 인자를 op에 남기므로 snapshot op에 step 이름이 붙는다. baseline op가 그 안에 없으면 전체 log를 한 번 더 읽는다.
    3. 아래 두 신호로 판정한다.
    4. 알림을 만들어 agent별 경로로 전달한다. baseline 파일은 지운다.
 
-Edit·Write 뒤의 PostToolUse는 snapshot만 한다.
+Edit·Write 뒤의 PostToolUse는 snapshot만 한다. 이때도 step 이름을 붙인다.
+
+## task와 step 이름
+
+자세한 내용은 ADR 0004에 있다.
+
+- **task:** agent가 일을 시작할 때 `jj describe -m`(`@`가 비었을 때)이나 `jj new -m`으로 `@`에 붙인다. skill의 task loop에 있다.
+- **step:** hook이 snapshot하는 jj 명령 끝에 `--config 'jj-agent.step=<step>'`을 붙인다. jj는 명령 인자를 op의 `args`로 남긴다. Bash는 Claude Code Bash 도구의 `description`, 없으면 명령 첫 줄을 쓴다. 파일 도구는 도구 이름과 경로, Codex patch는 patch가 건드린 파일을 쓴다. 첫 줄만, 최대 100바이트이고 문자 경계에서 자른다. jj가 인자를 거부하면 태그 없이 다시 snapshot한다.
+- `jj op log`의 `args:` 줄에 보인다. change 하나의 단계별 기록은 `jj evolog -r <id> -T 'operation.description() ++ "  " ++ operation.attributes() ++ "\n"'`로 본다.
 
 ## git 변경 감지
 
@@ -156,6 +165,8 @@ Muse는 hook의 `additionalContext`를 요청 맨 앞의 developer 메시지에 
 | Muse에서 `additionalContext`나 Stop hook으로 알리기 | 모델이 놓치거나 세션 전 일로 해석했다 | ADR 0002 |
 | Muse에서 정해진 점검 명령이 끝날 때까지 모든 tool 보류 | 순서를 지키는 데 필요한 것보다 크다. 1회 보류로 실측 6/6 | ADR 0002 |
 | Gemini, Copilot, Cursor 지원 | hook 입출력이 맞지 않는다. 필요해지면 별도 package로 만든다 | ADR 0001 |
+| agent가 부르는 snapshot 도구(MCP) | 매 단계 부르는 규칙은 빠뜨리기 쉽고, bash와 jj 외의 runtime이 필요하다 | ADR 0004 |
+| Codex에서 명령 앞에 이유 붙이기(`# ...`, `echo ...;`) | 주석은 `forbidden` 규칙을 끄고, 둘 다 sandbox 밖 실행에서 허용된 명령도 다시 묻게 한다 | ADR 0004 |
 
 ## 테스트와 측정
 
@@ -165,5 +176,6 @@ Muse는 hook의 `additionalContext`를 요청 맨 앞의 developer 메시지에 
   - shim
   - `.jj`가 없는 곳에서 아무것도 하지 않는지
   - Muse 보류 상태 전이
+  - snapshot op에 붙는 step 이름(길이 제한, UTF-8 경계 포함)
 - `tests/hooks-bench.sh`, `tests/hooks-profile.sh`: repo 크기별 hook 지연과 단계별 비용을 잰다.
 - 실제 Muse 모델로 하는 행동 실험은 repo에 넣지 않았다. 방법과 결과는 ADR 0002의 실험 1~6에 있다.

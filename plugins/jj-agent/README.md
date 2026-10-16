@@ -10,10 +10,35 @@ The plugin is opt-in per repository: a directory with `.jj/` (from `jj git init`
 | `scripts/shim/git` | Claude Code only. A `git` wrapper first on the Bash tool's `PATH`. Outside jj repos it hands everything straight to git. Inside a jj repo it lets through calls made by jj itself and read-only git (`rev-parse`, `ls-files`, ...). It blocks anything that changes state and prints the jj equivalent. It checks for `.jj` on every call, so it starts guarding as soon as a repo is converted. |
 | `SessionStart` | Claude Code: puts the shim on `PATH` via `CLAUDE_ENV_FILE`. Both: if the session starts in a jj repo, tells the agent so. |
 | `PreToolUse` (Bash, Edit, Write) | Bash in jj repos only: records the latest operation and a copy of the git index (copy-on-write where possible). It does not snapshot: the previous tool call and the turn start already did. Never rewrites the command. In Muse Code it also holds one call after a git-change report (see below); elsewhere the file tools pass straight through. |
-| `PostToolUse`, `PostToolUseFailure` (Bash) | In jj repos only: snapshots after each edit or command (Claude Code reports a command that exits non-zero as a failure, so both are hooked), so each step lands in `jj op log`. After a Bash command it reports git changes with the operation to restore (see below). The first time the agent touches a jj repo in a session (it ran `jj git init`, or `cd`'d into one), it tells the agent once. |
-| `UserPromptSubmit` | In jj repos only: snapshots, so what you changed between turns (in an editor or your own terminal) is recorded before the agent acts. Also catches a repo converted between turns and tells the agent once. |
+| `PostToolUse`, `PostToolUseFailure` (Bash) | In jj repos only: snapshots after each edit or command (Claude Code reports a command that exits non-zero as a failure, so both are hooked), so each step lands in `jj op log`, named by the step (see below). After a Bash command it reports git changes with the operation to restore (see below). The first time the agent touches a jj repo in a session (it ran `jj git init`, or `cd`'d into one), it tells the agent once. |
+| `UserPromptSubmit` | In jj repos only: snapshots (named `changes made between turns`), so what you changed between turns (in an editor or your own terminal) is recorded before the agent acts. Also catches a repo converted between turns and tells the agent once. |
 
 Outside jj repos, each hook exits after a directory walk looking for `.jj`. No jj process runs and nothing is added to the agent's context.
+
+## Each snapshot names its step
+
+The skill has the agent describe `@` with the task before it starts working, so every snapshot of the work belongs to a described change. The hooks name each snapshot after the step that caused it: jj records a command's arguments with the operation it makes, and the hooks add `--config 'jj-agent.step=<step>'` to the snapshotting command. `jj op log` shows it on the `args:` line:
+
+```
+○  b4f85e018080 root@vm default@ 9 seconds ago, lasted 9 milliseconds
+│  snapshot working copy
+│  args: jj util snapshot --config 'jj-agent.step=Bash: Run unit tests'
+○  9c24d485e1ab root@vm default@ 9 seconds ago, lasted 5 milliseconds
+│  snapshot working copy
+│  args: jj util snapshot --config 'jj-agent.step=Edit src/login.js'
+○  347c2b1e8b6b root@vm default@ 9 seconds ago, lasted 5 milliseconds
+│  describe commit 9e582e28e00759e173c28b5155abfafb4d6f8b3f
+│  args: jj describe -m 'fix: login redirect loop'
+```
+
+For one change's steps, `jj evolog -r <id> --no-graph -T 'operation.description() ++ "  " ++ operation.attributes() ++ "\n"'`.
+
+- **Shell command:** Claude Code's Bash tool description; without one (Codex, Muse Code), the first line of the command.
+- **File tool:** the tool name and the path in the repo. A Codex patch: the files it touches.
+- **Between turns:** `changes made between turns`.
+- First line only, at most 100 bytes, cut at a character boundary (jj rejects an argument that is not valid UTF-8); `...` marks a cut. If jj still refuses it, the hook snapshots without the name.
+
+No extra jj process runs. Asking Codex to prefix commands with a reason was tried and dropped: it changes how Codex applies its approval rules ([ADR 0004](../../docs/adr/0004-step-names-in-snapshots.md)).
 
 ## Git changes are reported, not just blocked
 
@@ -105,7 +130,7 @@ Without `.jj` (plain git repos and other directories) every hook exits silently,
 - **The shim affects only Claude Code's Bash tool.** Your terminal is untouched.
 - **What the shim cannot see:** git called by absolute path (`/usr/bin/git`), scripts that reset `PATH`, libgit2-based tools, and git MCP servers. The snapshots and the git-change report cover what slips through.
 - **Conflict markers:** the skill's preflight runs `jj config set --repo ui.conflict-marker-style git`. This changes how conflicts look in that repo for humans too.
-- **Latency:** a Bash command in a jj repo costs two jj processes: about 45 ms in a small repo and 90 ms at 30,000 files on macOS. The post-command snapshot grows with the number of files in the working copy. Turning on watchman (`fsmonitor.backend = "watchman"` in jj 0.46) made snapshots slower in our measurement, so it is not recommended here. Measure with `tests/hooks-bench.sh` and `tests/hooks-profile.sh`; recorded numbers and environment are in [BENCHMARK.md](../../BENCHMARK.md).
+- **Latency:** a Bash command in a jj repo costs two jj processes: about 45 ms in a small repo and 90 ms at 30,000 files on macOS. The post-command snapshot grows with the number of files in the working copy. Turning on watchman (`fsmonitor.backend = "watchman"` in jj 0.46) made snapshots slower in our measurement, so it is not recommended here. Naming the step adds only bash string handling. Measure with `tests/hooks-bench.sh` and `tests/hooks-profile.sh`; recorded numbers and environment are in [BENCHMARK.md](../../BENCHMARK.md).
 
 ## Development
 

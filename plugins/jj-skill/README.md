@@ -13,7 +13,7 @@ The skill is the same file as in jj-agent: a fixed task loop, an intent→comman
 | Git-change report | Nobody tells the agent that git changed the repo. |
 | Session-start / first-touch notice | The agent is not told that a directory is a jj repo. It picks the skill from its description, which names `.jj/` and `jj root`. |
 
-The skill mentions a "this is a jj repo" block message and a "jj-agent: during the last command ..." report. Those come from jj-agent's hooks and never appear with this plugin alone.
+The skill mentions a "this is a jj repo" block message, a "jj-agent: during the last command ..." report, and step names on snapshots (`jj-agent.step=...`). Those come from jj-agent's hooks and never appear with this plugin alone. The task name the skill has the agent put on `@` (`jj describe -m` before working) works without them.
 
 Install one of jj-skill and jj-agent, not both: jj-agent already contains the skill, and with both the agent sees it twice.
 
