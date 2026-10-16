@@ -1,7 +1,7 @@
 {
   "name": "jj-skill",
   "displayName": "jj skill",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "The jj-agent workflow skill on its own, with no hooks: a non-interactive Jujutsu (jj) workflow the agent follows for every version-control action in jj repos. Nothing guards git or snapshots each step; use jj-agent for that.",
   "author": { "name": "Yejun" },
   "license": "MIT",
