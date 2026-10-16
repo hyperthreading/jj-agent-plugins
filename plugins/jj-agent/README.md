@@ -109,8 +109,10 @@ Without `.jj` (plain git repos and other directories) every hook exits silently,
 
 ## Development
 
-Versions are kept in lockstep in `apm.yml`, `.claude-plugin/plugin.json` and the root `apm.yml`. The root `.claude-plugin/marketplace.json` is generated. After changing either, run from the repo root:
+Versions are kept in lockstep in `apm.yml`, `.claude-plugin/plugin.json` and the root `apm.yml`, for both jj-agent and [jj-skill](../jj-skill/README.md). The root `.claude-plugin/marketplace.json` is generated. After changing either, run from the repo root:
 
 ```bash
 apm pack --check-versions
 ```
+
+`skills/jj/SKILL.md` is also shipped on its own in `plugins/jj-skill`. Copy it there after editing it, and check with `tests/skill-sync-test.sh`.

@@ -38,6 +38,8 @@ apm install hyperthreading/jj-agent-plugins/plugins/jj-agent
 
 Restart the agent session after installing. In Codex, trust the hooks with `/hooks`; in Muse Code, `approve` does that. Needs `jj` on `PATH`.
 
+**Skill only:** if the agent follows the skill well enough without a git guard or snapshots, install `jj-skill` instead of `jj-agent` (same commands with `jj-skill@yejun-jj`, or `apm install hyperthreading/jj-agent-plugins/plugins/jj-skill`). It has no hooks, so there is nothing to trust or approve. See [plugins/jj-skill/README.md](plugins/jj-skill/README.md) for what it leaves out. Install one of the two, not both.
+
 To use it in a repo, make the repo a jj repo. For an existing git repo:
 
 ```bash
@@ -48,11 +50,12 @@ jj git init
 
 - [docs/DESIGN.md](docs/DESIGN.md): the whole design in one page (components, per-agent behavior, detection, Muse delivery, state, what was ruled out)
 - [plugins/jj-agent/README.md](plugins/jj-agent/README.md): what each part does, using it in an existing git repo, updating, and limits
+- [plugins/jj-skill/README.md](plugins/jj-skill/README.md): the skill alone, without hooks, and what that gives up
 - [docs/adr/0001-apm-portable-packaging.md](docs/adr/0001-apm-portable-packaging.md): design decisions (packaging, git guard, change detection)
 - [docs/adr/0002-muse-code-support.md](docs/adr/0002-muse-code-support.md): Muse Code support
 - [docs/adr/0003-detector-fixes.md](docs/adr/0003-detector-fixes.md): git-change detection fixes (gitdir files, long operation logs)
 - [BENCHMARK.md](BENCHMARK.md): hook latency and test environment
-- `tests/`: `hooks-test.sh` (scenarios), `hooks-bench.sh` and `hooks-profile.sh` (latency)
+- `tests/`: `hooks-test.sh` (scenarios), `hooks-bench.sh` and `hooks-profile.sh` (latency), `skill-sync-test.sh` (the two skill copies match)
 
 ## License
 
