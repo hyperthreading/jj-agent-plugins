@@ -164,3 +164,27 @@ out=$(MUSE_PLUGIN_ID=test hook PostToolUseFailure post-tool "$tmp/muse-pre-faile
 out=$(MUSE_PLUGIN_ID=test hook PreToolUse pre-tool "$tmp/muse-pre-failed")
 case $out in *'"permissionDecision":"deny"'*'Initialized Git worktree'*'jj operation history is local'*) ;; *) exit 1 ;; esac
 printf '  ok    Muse retains initialization context when the first tool fails\n'
+
+# Native Muse file tools use relative `path`, resolved against the hook's cwd,
+# which can differ from this test process's cwd and be outside every jj repo.
+git -C "$main" worktree add -q --detach "$tmp/muse-file-path"
+printf 'native edit\n' >> "$tmp/muse-file-path/f"
+muse_file_post() {
+  printf '{"session_id":"muse-file","hook_event_name":"PostToolUse","cwd":"%s","tool_name":"edit_file","tool_input":{"path":"%s"},"tool_response":"edited"}' "$tmp" "$1" |
+    MUSE_PLUGIN_ID=test CLAUDE_PLUGIN_DATA="$tmp/state" "$HB" "$P/post-tool.sh"
+}
+rc=0
+out=$(muse_file_post muse-file-path/f 2>&1) || rc=$?
+[ "$rc" = 2 ] && [ -d "$tmp/muse-file-path/.jj/repo" ]
+case $out in *'Initialized Git worktree'*vcs=jj-colocated*) ;; *) exit 1 ;; esac
+(cd "$tmp/muse-file-path" && jj file show f) | grep -q 'native edit'
+printf '  ok    native Muse relative file path initializes a worktree outside cwd\n'
+printf 'second native edit\n' >> "$tmp/muse-file-path/f"
+out=$(muse_file_post muse-file-path/f 2>&1)
+[ -z "$out" ]
+attrs=$(jj -R "$tmp/muse-file-path" op log --ignore-working-copy --no-graph -n 1 -T attributes)
+case $attrs in *'jj-agent.step=edit_file f'*) ;; *) printf 'Missing file step: %s\n' "$attrs"; exit 1 ;; esac
+printf '  ok    native Muse file snapshots include the repo-relative filename\n'
+out=$(muse_file_post 'main repo/submodule/f' 2>&1)
+[ -z "$out" ] && [ ! -e "$submodule/.jj" ]
+printf '  ok    native Muse file paths still respect submodule boundaries\n'
