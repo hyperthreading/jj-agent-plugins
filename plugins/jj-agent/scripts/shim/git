@@ -40,7 +40,7 @@ rest=("${args[@]:$((i+1))}")
 
 # Inside a jj repo? (walk up looking for .jj — no jj process needed)
 d=$(cd "$dir" 2>/dev/null && pwd -P) || real_git "$@"
-while [ "$d" != "/" ] && [ ! -d "$d/.jj" ]; do d=$(dirname "$d"); done
+while [ "$d" != "/" ] && [ ! -d "$d/.jj" ] && [ ! -f "$d/.git" ]; do d=$(dirname "$d"); done
 [ -d "$d/.jj" ] || real_git "$@"
 
 # Called by jj itself (jj git fetch/push spawn git) → allow.
@@ -86,6 +86,7 @@ Use jj instead (see the jj skill):
   git rebase        -> jj rebase -o <dest>       git reset --hard   -> jj restore / jj abandon
   git pull/fetch    -> jj git fetch              git push           -> jj git push -b <bookmark>
   git branch X      -> jj bookmark create X -r <rev>
+  git worktree add  -> jj workspace add <path>
 If a jj flag fails, run: jj <command> --help. Do not work around this block.
 EOF
 exit 1

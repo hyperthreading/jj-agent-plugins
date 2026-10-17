@@ -36,7 +36,7 @@ hook_input() { # event cwd tool_use_id tool_name command [more tool_input JSON, 
 make_nojq_path() {
   local d=$tmp/nojq-bin t p dir
   mkdir -p "$d"
-  for t in bash sh jj awk sed grep cut tr cksum dirname cat mkdir printf ls wc chmod head find rm ps basename env cp cmp; do
+  for t in python3 bash sh jj awk sed grep cut tr cksum dirname cat mkdir printf ls wc chmod head find rm ps basename env cp cmp; do
     p=$(type -P "$t") && ln -sf "$p" "$d/$t"
   done
   # real git: the first git on PATH that is not a shim
@@ -181,6 +181,34 @@ run_suite() { # label hook-PATH
   call "./reset-f.sh";                                  expect ".git is a gitdir: file" "git rewrote these files: f"
   repo=$main_repo
 
+  # Creating a Git worktree must neither convert it nor suppress any imported ref change.
+  local wt_ext="$tmp/$label/wt-ext" wt_more="$tmp/$label/wt-more"
+  call "git worktree add -q '$wt_ext' -b wt-branch"
+  expect "git worktree add reports the new ref" "git moved HEAD or refs"
+  [ ! -e "$wt_ext/.jj" ] && [ "$(git -C "$wt_ext" symbolic-ref --short HEAD)" = wt-branch ] &&
+    ok "git worktree stays on its branch without .jj" || bad "git worktree stays on its branch without .jj" "$OUT"
+  call "git branch unrelated HEAD && jj util snapshot"
+  call "git worktree add -q '$wt_more' -b wt-more && git branch -f unrelated HEAD~1"
+  expect "worktree creation does not hide unrelated ref moves" "git moved HEAD or refs"
+
+  # First touch initializes the worktree using the parent's shared jj repo.
+  repo=$wt_ext
+  user_turn "echo dirty >> f"
+  [ -f "$wt_ext/.jj/repo" ] && [ ! -e "$wt_ext/.jj/jj-agent-wt" ] &&
+    ok "touched worktree shares jj metadata without a plugin marker" ||
+    bad "touched worktree shares jj metadata without a plugin marker" "missing shared-repo pointer"
+  call "./reset-f.sh"; expect "adopted worktree reports git rewrites" "git rewrote these files: f"
+  repo=$main_repo
+
+  # An explicitly created jj workspace has .jj beside its .git file and remains protected.
+  local jj_wt="$tmp/$label/jj-workspace"
+  (jj -R "$repo" workspace add --colocate --name explicit "$jj_wt" >/dev/null 2>&1) ||
+    bad "$label: explicit workspace setup" "failed"
+  repo=$jj_wt
+  user_turn "echo keep >> f"
+  call "./reset-f.sh"; expect "explicit colocated workspace still reports git file rewrites" "git rewrote these files: f"
+  repo=$main_repo
+
   # Outside a jj repo: no output, nothing written.
   local data2=$tmp/$label/data-plain
   r=$( (hook_input PreToolUse "$tmp/$label/plain" x Bash "git commit" | CLAUDE_PLUGIN_DATA=$data2 PATH=$hook_path $HB "$P/pre-tool.sh"
@@ -290,14 +318,14 @@ muse_post mu13 '{\n  \"exit_code\": 0,\n  \"output\": \"'"$big"'\"\n}'
   ok "result over 16 KiB: left as it is, the notice goes to the next call" || bad "result over 16 KiB: left as it is, the notice goes to the next call" "rc=$MRC err=${#MERR} bytes, pending=$(head -n 1 "$pending" 2>&1)"
 rm -f "$pending"
 
-echo "== no .jj (plain git repo, plain directory)"
+echo "== no .jj (plain git repo, plain git worktree, plain directory)"
 # Where there is no .jj the plugin must be inert: every hook silent, nothing written, no jj repo
 # created, and git through the shim behaves exactly like git.
-g=$tmp/plain-git d=$tmp/plain-dir data3=$tmp/data-nojj
+g=$tmp/plain-git gw=$tmp/plain-wt d=$tmp/plain-dir data3=$tmp/data-nojj
 mkdir -p "$g" "$d"
 (cd "$g" && git init -q && git config user.email t@example.com && git config user.name t &&
-  echo a > a && git add a && git commit -qm first) || bad "plain git repo setup" "git init failed"
-for dir in "$g" "$d"; do
+  echo a > a && git add a && git commit -qm first && git worktree add -q "$gw" -b wt-plain) || bad "plain git repo setup" "git init failed"
+for dir in "$g" "$gw" "$d"; do
   r=$(
     : > "$tmp/env-nojj"
     hook_input SessionStart "$dir" s1 x x | CLAUDE_ENV_FILE=$tmp/env-nojj CLAUDE_PLUGIN_DATA=$data3 $HB "$P/session-start.sh"

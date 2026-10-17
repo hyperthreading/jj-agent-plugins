@@ -7,7 +7,10 @@
 . "${BASH_SOURCE%/*}/lib.sh"
 read_input
 json_get cwd cwd; cwd=${cwd:-$PWD}
-find_jj_root "$cwd" || exit 0
+find_jj_root "$cwd" || {
+  [ -n "$ADOPTION_CONTEXT" ] && emit_context UserPromptSubmit "$ADOPTION_CONTEXT"
+  exit 0
+}
 json_get session_id SESSION_ID
 scan_dirs "$cwd"
 step_args 'changes made between turns'

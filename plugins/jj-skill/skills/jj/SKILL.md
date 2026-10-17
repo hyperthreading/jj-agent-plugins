@@ -44,7 +44,7 @@ jj commit -m "feat: ..."    # 3. Done: final message for @, and a fresh empty @ 
 - The finished change is `@-`. An empty, undescribed `@` on top of it is normal.
 - Several tasks in a row, or several logical steps in one task: repeat 1–3 for each.
 - A small fix to the task just finished is not a new task: make it in the empty `@`, then `jj squash -u`.
-- Parallel tasks share one working copy and mix their edits in `@`. Give each its own `jj workspace add <path>`.
+- Parallel tasks share one working copy and mix their edits in `@`. Give each its own `jj workspace add <path>`. For a colocated workspace, use `jj workspace add --colocate <new-path>` (jj 0.46+). On first touch, jj-agent automatically initializes Git worktrees of jj repos as workspaces sharing the main jj repository and operation history; advance the worktree branch after committing (`jj bookmark set <branch> -r @-`) so Git-based tools see finished work. Automatically attached workspaces retain a temporary recorded root in jj 0.46: address them with `jj -R <actual-path>` and let the Git harness remove them; do not use `jj workspace remove` or `workspace root --name` for them.
 
 ## Intent → command
 

@@ -27,10 +27,26 @@ json_str() {
   printf -v "$1" '%s' "$_s"
 }
 
-# JJ_ROOT <- the jj workspace root containing directory $1 (walks up looking for .jj; no jj
-# process). Fails if there is none.
+ADOPTION_CONTEXT=
+ADOPTION_TRIED=()
+
+# Only a worktree actually reached through cwd or a tool path is initialized. No repo-wide sweep.
+# Python is needed only for this one-time path (an OS lock spans both the helper and jj child).
+adopt_git_worktree() {
+  local wt=$1 data=${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/jj-agent} seen note rc sid
+  for seen in "${ADOPTION_TRIED[@]}"; do [ "$seen" = "$wt" ] && return 1; done
+  ADOPTION_TRIED[${#ADOPTION_TRIED[@]}]=$wt
+  command -v jj >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 || return 1
+  json_get session_id sid
+  note=$(python3 "${BASH_SOURCE%/*}/adopt-worktree.py" "$wt" "$data" "${sid:-default}" 2>/dev/null); rc=$?
+  ADOPTION_CONTEXT="${ADOPTION_CONTEXT}${ADOPTION_CONTEXT:+${note:+ }}$note"
+  return "$rc"
+}
+
+# JJ_ROOT <- the jj workspace root containing directory $1. A .git file is a boundary;
+# initialize a touched worktree of a jj repo without ever falling through to its parent.
 find_jj_root() {
-  local d=$1
+  local d=$1 l= gd main data=${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/jj-agent}
   JJ_ROOT=
   [ -n "$d" ] || return 1
   case $d in /*) ;; *) d=$PWD/$d ;; esac
@@ -38,6 +54,23 @@ find_jj_root() {
   case $d in */../*|*/..|*/./*|*/.) d=$(cd "$d" 2>/dev/null && pwd -P) || return 1 ;; esac
   d=${d%/}
   while :; do
+    [ ! -f "$d/.git" ] || d=$(cd "$d" 2>/dev/null && pwd -P) || return 1
+    # Retry partial metadata only while this is still a qualifying Git worktree.
+    # A path reused as an ordinary directory/repo must ignore its stale record.
+    if [ -f "$d/.git" ] && { [ ! -d "$d/.jj" ] || [ -f "$data/adoptions$d/pending" ]; }; then
+      IFS= read -r l < "$d/.git" 2>/dev/null || [ -n "$l" ] || return 1
+      case $l in 'gitdir: '?*) gd=${l#gitdir: }; gd=${gd%$'\r'} ;; *) return 1 ;; esac
+      case $gd in /*) ;; *) gd=$(cd "$d" && cd "$gd" 2>/dev/null && pwd -P) || return 1 ;; esac
+      case $gd in */.git/worktrees/*)
+        main=${gd%/.git/worktrees/*}
+        if [ -d "$main/.jj" ]; then
+          adopt_git_worktree "$d" || return 1
+          JJ_ROOT=$d; return 0
+        fi ;;
+      esac
+      if [ -d "$d/.jj" ]; then JJ_ROOT=$d; return 0; fi
+      return 1
+    fi
     if [ -d "$d/.jj" ]; then JJ_ROOT=${d:-/}; return 0; fi
     [ -n "$d" ] || return 1
     d=${d%/*}
@@ -86,6 +119,8 @@ scan_dirs() {
       NEW_CONTEXT="${NEW_CONTEXT:+$NEW_CONTEXT }$CTX"
     fi
   done
+  NEW_CONTEXT="$ADOPTION_CONTEXT${ADOPTION_CONTEXT:+${NEW_CONTEXT:+ }}$NEW_CONTEXT"
+  ADOPTION_CONTEXT=
 }
 
 # Emit additionalContext for hook event $1 with text $2.
