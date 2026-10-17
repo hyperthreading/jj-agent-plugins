@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Real Git/jj regressions for shared GC ownership and refusal caching."""
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SCRIPTS = Path(__file__).resolve().parents[1] / 'plugins/jj-agent/scripts'
@@ -248,6 +250,22 @@ class SharedRepository(unittest.TestCase):
         finally:
             self.env['PATH'] = old_path
         self.hook(self.main)
+        self.assertFalse(record.exists())
+
+    def test_deeply_nested_record_does_not_stop_later_cleanup(self):
+        self.adopt()
+        record = next(self.data.glob('managed-workspaces/*/*.json'))
+        invalid = record.parent / 'deeply-nested.json'
+        invalid.write_text('[' * 2000 + ']' * 2000)
+        self.git(self.main, 'worktree', 'remove', str(self.wt))
+        spec = importlib.util.spec_from_file_location('adoption', SCRIPTS / 'adopt-worktree.py')
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        # Force the bad record first regardless of the filesystem's directory order.
+        with patch.object(Path, 'glob', return_value=iter([invalid, record])):
+            self.assertEqual(helper.cleanup(self.main, self.data), 0)
+        self.assertEqual(self.names(), {'default'})
+        self.assertTrue(invalid.exists())
         self.assertFalse(record.exists())
 
     def call_count(self):

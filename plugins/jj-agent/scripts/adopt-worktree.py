@@ -257,7 +257,7 @@ def cleanup(root, data):
                                         stderr=subprocess.PIPE, pass_fds=(lock.fileno(),))
                 if result.returncode == 0:
                     record.unlink()
-        except (OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError, RecursionError):
             # Preserve unreadable/invalid records and continue with other owned
             # workspaces. Cleanup must never add text to the hook's JSON output.
             continue
