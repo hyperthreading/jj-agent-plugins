@@ -33,11 +33,12 @@ ADOPTION_TRIED=()
 # Only a worktree actually reached through cwd or a tool path is initialized. No repo-wide sweep.
 # Python is needed only for this one-time path (an OS lock spans both the helper and jj child).
 adopt_git_worktree() {
-  local wt=$1 data=${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/jj-agent} seen note rc
+  local wt=$1 data=${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/jj-agent} seen note rc sid
   for seen in "${ADOPTION_TRIED[@]}"; do [ "$seen" = "$wt" ] && return 1; done
   ADOPTION_TRIED[${#ADOPTION_TRIED[@]}]=$wt
   command -v jj >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 || return 1
-  note=$(python3 "${BASH_SOURCE%/*}/adopt-worktree.py" "$wt" "$data" 2>/dev/null); rc=$?
+  json_get session_id sid
+  note=$(python3 "${BASH_SOURCE%/*}/adopt-worktree.py" "$wt" "$data" "${sid:-default}" 2>/dev/null); rc=$?
   ADOPTION_CONTEXT="${ADOPTION_CONTEXT}${ADOPTION_CONTEXT:+${note:+ }}$note"
   return "$rc"
 }

@@ -17,7 +17,14 @@ REAL_JJ = shutil.which("jj")
 WRAPPER = r'''
 import os, pathlib, subprocess, sys, time
 args = sys.argv[1:]
-if args[:2] == ['git', 'init']:
+if 'util' in args and args[args.index('util') + 1] == 'snapshot':
+    mode = os.environ.get('FAULT', '')
+    if mode == 'snapshot-before':
+        print('injected failure after metadata attachment'); sys.exit(23)
+    if mode == 'snapshot-pause':
+        pathlib.Path(os.environ['READY']).write_text(str(os.getppid()))
+        while not pathlib.Path(os.environ['RELEASE']).exists(): time.sleep(.01)
+if 'workspace' in args and args[args.index('workspace') + 1] == 'add':
     with open(os.environ['CALLS'], 'a') as f: f.write('init\n')
     mode = os.environ.get('FAULT', '')
     if mode == 'before':
@@ -277,7 +284,9 @@ class AdoptionFailures(unittest.TestCase):
 
     def test_partial_metadata_is_preserved_and_reported(self):
         self.assertIn("did not finish", self.hook("partial"))
-        marker = self.wt / ".jj" / "keep"
+        pending = next((self.base / 'data/adoptions').rglob('pending'))
+        stage = Path(json.loads(pending.read_text())['stage'])
+        marker = stage / '.jj' / 'keep'
         marker.write_text("must not discard incomplete metadata")
         self.assertIn("did not finish", self.hook())
         self.assertTrue(marker.exists())
@@ -316,6 +325,29 @@ class AdoptionFailures(unittest.TestCase):
         first.communicate(timeout=10)
         self.assertIn("Initialized Git worktree", self.hook())
         self.assertEqual((self.base / "calls").read_text(), "init\n")
+        self.intact()
+
+    def test_failure_after_metadata_attachment_resumes_without_materializing_deletions(self):
+        self.assertIn('did not finish', self.hook('snapshot-before'))
+        self.assertTrue((self.wt / '.jj/repo').is_file())
+        self.assertFalse((self.wt / 'deleted').exists())
+        self.intact()
+        self.assertIn('Initialized Git worktree', self.hook())
+        self.assertEqual((self.base / 'calls').read_text(), 'init\n')
+        self.assertRegex(self.run_cmd(REAL_JJ, '-R', str(self.wt), 'diff', '--summary'), r'(?m)^D .*deleted$')
+        self.intact()
+
+    def test_kill_after_metadata_attachment_keeps_deletions_and_resumes(self):
+        first = self.start('snapshot-pause')
+        self.ready()
+        self.assertTrue((self.wt / '.jj/repo').is_file())
+        self.assertIn('already running', self.hook())
+        self.intact()
+        os.killpg(first.pid, signal.SIGKILL)
+        first.communicate(timeout=10)
+        self.assertIn('Initialized Git worktree', self.hook())
+        self.assertFalse((self.wt / 'deleted').exists())
+        self.assertEqual((self.base / 'calls').read_text(), 'init\n')
         self.intact()
 
 

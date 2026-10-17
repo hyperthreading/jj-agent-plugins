@@ -2,7 +2,7 @@
 
 Make coding agents use [Jujutsu](https://jj-vcs.github.io/jj/) instead of git, **only in jj repos**. Works with Claude Code (and its subagents), Codex and Muse Code.
 
-The plugin is opt-in per repository: a directory with `.jj/` (from `jj git init` or `jj git clone`) opts in. Everywhere else it does nothing. A repo converted in the middle of a session is picked up without a restart, and a `git worktree` of a jj repo is automatically initialized with `jj git init --colocate` when a hook first reaches it through its working directory or a tool file path. Working files stay in place. Git commits and branches remain shared, while jj metadata and operation history belong to the worktree itself.
+The plugin is opt-in per repository: a directory with `.jj/` (from `jj git init` or `jj git clone`) opts in. Everywhere else it does nothing. A repo converted in the middle of a session is picked up without a restart, and a `git worktree` of a jj repo is automatically attached to the main jj repository when a hook first reaches it through its working directory or a tool file path. Working files stay in place. Git commits, jj metadata and operation history are shared with the main repository.
 
 | Part | What it does |
 |---|---|
@@ -17,18 +17,18 @@ Outside jj repos, each hook exits after a directory walk looking for `.jj`. No j
 
 ## Automatic worktree initialization
 
-This path needs Python 3 with POSIX `fcntl` (macOS/Linux), in addition to jj and Git. Ordinary hooks still use Bash; if Python is unavailable, raw worktrees stay unchanged and remain boundaries.
+This path needs Python 3 with POSIX `fcntl` (macOS/Linux), jj and Git. Without Python, raw worktrees stay unchanged and remain boundaries.
 
-- Only the checkout reached through `cwd` or a tool's file path is initialized. Creating a worktree from the parent does not initialize it until first touch; other users' and sessions' worktrees are never swept.
-- `jj git init --colocate` adds local `.jj` metadata without moving, copying or deleting working files or pruning Git registrations. Uncommitted changes become `@`, and HEAD may become detached. Worktrees with staged changes are left unchanged and reported: automatic initialization must not discard content that exists only in Git's index.
-- Sparse checkouts, skip-worktree entries and an unborn HEAD also postpone initialization. A copied or manually moved checkout must have its own valid Git worktree registration; mismatches are left unchanged with a repair notice.
-- The initialized worktree is a **separate jj repository backed by the same Git repository**. It does not appear in the parent's `jj workspace list`, and `jj op restore` is local to it. Use bookmarks to share finished work (`jj bookmark set <branch> -r @-` after committing); for a shared jj operation history, create a new checkout explicitly with `jj workspace add --colocate <new-path>`.
-- An OS lock serializes initialization of the same Git worktree. A pending record and errors live under `CLAUDE_PLUGIN_DATA` (or the usual temporary plugin-data directory), never in a project marker. Keep that directory consistent across sessions. An interrupted, loadable `.jj` resumes with a snapshot; incomplete metadata is preserved and reported for inspection, never automatically deleted. Working files and Git registration remain in place even if the hook is killed.
-- Retry records identify the original checkout and Git admin directory, so reusing a path does not resume another worktree's initialization. Muse receives first-PreToolUse initialization notices through the following tool result, or through the next held call if that result cannot carry them.
-- The initialization notice is emitted only when initialization finishes. Later sessions receive the ordinary jj context, without claiming another conversion.
-- Harness cleanup still uses Git's worktree registration. Clean initialized worktrees support `git worktree remove`; dirty ones need the harness's usual explicit discard decision. Before removing any jj checkout, put wanted work on a bookmark: deleting `.jj` also removes its local operation history. No extra workspace record is left in the parent's jj repo.
+- Only the checkout reached through `cwd` or a tool's file path is initialized. Creating a worktree from the parent waits until first touch; unrelated worktrees are never swept.
+- The worktree joins the **same jj repository and operation history** as the main checkout. Each workspace has its own `@`. This gives one owner to Git's `refs/jj/keep/*`; separate jj repositories over one Git store can otherwise garbage-collect each other's working-copy/history objects.
+- A unique sibling directory is used to create an empty jj workspace at `root()` with full sparse patterns and `--no-colocate`. Only its newly created `.jj` metadata is renamed into the existing worktree. jj then imports the existing Git HEAD and snapshots the existing files. No user file is moved, copied, deleted or recreated; tracked deletions stay absent throughout. No Git registration is pruned.
+- Staged changes, sparse/skip-worktree entries, an unborn HEAD or a mismatched registration postpone initialization. The refusal is cached per session: unchanged state gets a metadata-only check with no Git/jj subprocesses or repeated notice. Index, HEAD/ref, sparse/config or registration changes invalidate the cache.
+- A POSIX lock keyed by the Git admin path serializes initialization, including after helper-only termination because the jj child inherits the lock. Keep plugin data consistent across sessions. Pending/error records identify the worktree and temporary metadata; retries reuse them, and incomplete metadata is retained for inspection.
+- Initialization notices appear once on completion. Muse's first-PreToolUse notice survives to the following tool result, or the next held call when needed. Its native relative `path` is resolved against hook `cwd` for file-path-only initialization and snapshot labels.
+- **Recorded-path limitation (jj 0.46):** the workspace registry still names the unique temporary sibling, although the current workspace is at the original Git path. Use `jj -R <actual-path>` or commands inside that checkout; do not use `jj workspace root --name` or `jj workspace remove` to locate/remove an automatically attached worktree. Ordinary explicitly created jj workspaces are unaffected. The plugin does not edit jj's internal registry format.
+- Harness cleanup uses the existing Git registration (`git worktree remove`). Clean worktrees need no force; dirty ones retain Git's normal discard protection. The next SessionStart in the shared repo forgets only plugin-created completed workspaces whose Git checkout is gone, and leaves present/moved worktrees and unrelated explicit workspaces alone. Shared operation history remains subject to jj's normal retention policy. Bookmark wanted work before removing a checkout.
 
-The design and failure cases are recorded in [ADR 0005](../../docs/adr/0005-safe-worktree-adoption.md).
+The jj 0.46 behavior (relative repo pointer, colocation import of Git HEAD without checkout, and GC ownership) is pinned by regression tests and must be rechecked when upgrading jj. See [ADR 0005](../../docs/adr/0005-safe-worktree-adoption.md).
 
 ## Each snapshot names its step
 

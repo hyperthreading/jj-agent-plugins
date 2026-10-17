@@ -191,12 +191,12 @@ run_suite() { # label hook-PATH
   call "git worktree add -q '$wt_more' -b wt-more && git branch -f unrelated HEAD~1"
   expect "worktree creation does not hide unrelated ref moves" "git moved HEAD or refs"
 
-  # First touch initializes the worktree without registering it in the parent's jj repo.
+  # First touch initializes the worktree using the parent's shared jj repo.
   repo=$wt_ext
   user_turn "echo dirty >> f"
-  [ -d "$wt_ext/.jj/repo" ] && [ ! -e "$wt_ext/.jj/jj-agent-wt" ] &&
-    ok "touched worktree gets local jj metadata without a plugin marker" ||
-    bad "touched worktree gets local jj metadata without a plugin marker" "missing or shared repo"
+  [ -f "$wt_ext/.jj/repo" ] && [ ! -e "$wt_ext/.jj/jj-agent-wt" ] &&
+    ok "touched worktree shares jj metadata without a plugin marker" ||
+    bad "touched worktree shares jj metadata without a plugin marker" "missing shared-repo pointer"
   call "./reset-f.sh"; expect "adopted worktree reports git rewrites" "git rewrote these files: f"
   repo=$main_repo
 

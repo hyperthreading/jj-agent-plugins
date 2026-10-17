@@ -5,7 +5,7 @@ Make coding agents (Claude Code, Codex and Muse Code) use [Jujutsu](https://jj-v
 - **Skill:** a non-interactive jj workflow the agent follows for every version-control action.
 - **Git guard:** in Claude Code, a `git` shim on the agent's `PATH` blocks git commands that change state and names the jj equivalent.
 - **Snapshots and git-change reports:** each edit and command lands in `jj op log`, named by the step that made it, under a change the agent describes with its task. When git changes the repo anyway (from a script, or in Codex and Muse Code where the shim cannot be used), the agent is told what happened and which operation to restore.
-- **Git worktrees of jj repos:** on first touch, initialize local jj metadata without moving working files. Git commits/branches stay shared; jj operation history is local. This optional path needs Python 3 on macOS/Linux. See [worktree initialization](plugins/jj-agent/README.md#automatic-worktree-initialization).
+- **Git worktrees of jj repos:** on first touch, attach the checkout to the main jj repository without moving working files. Git commits and jj operation history stay shared. This optional path needs Python 3 on macOS/Linux. See [worktree initialization](plugins/jj-agent/README.md#automatic-worktree-initialization).
 
 ## Install
 
@@ -60,7 +60,7 @@ jj git init
 - [docs/adr/0004-step-names-in-snapshots.md](docs/adr/0004-step-names-in-snapshots.md): task and step names in snapshots, and the Codex approval experiment
 - [docs/adr/0005-safe-worktree-adoption.md](docs/adr/0005-safe-worktree-adoption.md): automatic worktree initialization, scope, concurrency and failure handling
 - [BENCHMARK.md](BENCHMARK.md): hook latency and test environment
-- `tests/`: `hooks-test.sh` (scenarios), `worktree-boundary-test.sh` (scope and file preservation), `adoption-failure-test.py` (concurrency and interruption), `hooks-bench.sh` and `hooks-profile.sh` (latency), `skill-sync-test.sh` (the two skill copies match)
+- `tests/`: `hooks-test.sh` (scenarios), `worktree-boundary-test.sh` (scope and file preservation), `adoption-failure-test.py` (concurrency and interruption), `gc-safety-test.py` (shared GC, cleanup and refusal caching), `hooks-bench.sh` and `hooks-profile.sh` (latency), `skill-sync-test.sh` (the two skill copies match)
 
 ## License
 

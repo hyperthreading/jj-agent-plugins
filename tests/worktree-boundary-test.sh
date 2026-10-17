@@ -73,8 +73,8 @@ for wt in "$external" "$nested" "$submodule"; do
     [ -z "$out" ] && [ ! -e "$wt/.jj" ]
   else
     out=$(all_hooks "$wt/deep/child" 2>&1)
-    case $out in *"Initialized Git worktree"*"jj operation history is local"*) ;; *) printf 'Missing adoption notice: %s\n' "$out"; exit 1 ;; esac
-    [ -d "$wt/.jj/repo" ] && [ ! -e "$wt/.jj/jj-agent-wt" ]
+    case $out in *"Initialized Git worktree"*"jj operation history are shared"*) ;; *) printf 'Missing adoption notice: %s\n' "$out"; exit 1 ;; esac
+    [ -f "$wt/.jj/repo" ] && [ ! -e "$wt/.jj/jj-agent-wt" ]
     again=$(all_hooks "$wt/deep/child" 2>&1)
     case $again in *"Initialized Git worktree"*) exit 1 ;; esac
   fi
@@ -102,8 +102,8 @@ for wt in "$external" "$nested" "$submodule"; do
   printf '  ok    %s: shim uses the checkout boundary\n' "$name"
 done
 [ ! -e "$JJ_BOUNDARY_CALLS" ]
-[ "$(jj -R "$main" op log --ignore-working-copy --no-graph -n 1 -T id)" = "$before" ]
-printf '  ok    adoption keeps jj operation history separate from the parent\n'
+[ "$(cd "$main" && jj file show -r @ f)" = base ]
+printf '  ok    adoption shares jj history while preserving the parent working-copy content\n'
 
 # Invalid .git files must also stop the walk; no content parsing is needed to find the boundary.
 mkdir "$main/invalid"
@@ -122,9 +122,10 @@ fi
 grep -q 'Blocked: this is a jj' "$tmp/blocked"
 printf '  ok    explicit jj workspace is announced and guarded\n'
 
-# Adopted Git worktrees can still be removed by their owning harness; no jj workspace was registered.
+# Git harness removal followed by SessionStart forgets only plugin-created missing workspaces.
 git -C "$main" worktree remove --force "$external"
 git -C "$main" worktree remove --force "$nested"
+hook SessionStart session-start "$main" >/dev/null
 names=$(jj -R "$main" workspace list --ignore-working-copy -T 'name ++ "\n"')
 [ "$names" = "$(printf 'default\nexplicit')" ]
 printf '  ok    Git cleanup leaves no plugin-created jj workspaces\n'
@@ -150,7 +151,7 @@ out=$(MUSE_PLUGIN_ID=test hook PreToolUse pre-tool "$tmp/muse-pre-first")
 rc=0
 out=$(MUSE_PLUGIN_ID=test hook PostToolUse post-tool "$tmp/muse-pre-first" 2>&1) || rc=$?
 [ "$rc" = 2 ]
-case $out in *'Initialized Git worktree'*'jj operation history is local'*vcs=jj-colocated*) ;; *) exit 1 ;; esac
+case $out in *'Initialized Git worktree'*'jj operation history are shared'*vcs=jj-colocated*) ;; *) exit 1 ;; esac
 out=$(MUSE_PLUGIN_ID=test hook PostToolUse post-tool "$tmp/muse-pre-first" 2>&1)
 [ -z "$out" ]
 printf '  ok    Muse first PreToolUse delivers initialization at PostToolUse, once\n'
@@ -162,7 +163,7 @@ out=$(MUSE_PLUGIN_ID=test hook PreToolUse pre-tool "$tmp/muse-pre-failed")
 out=$(MUSE_PLUGIN_ID=test hook PostToolUseFailure post-tool "$tmp/muse-pre-failed" 2>&1)
 [ -z "$out" ]
 out=$(MUSE_PLUGIN_ID=test hook PreToolUse pre-tool "$tmp/muse-pre-failed")
-case $out in *'"permissionDecision":"deny"'*'Initialized Git worktree'*'jj operation history is local'*) ;; *) exit 1 ;; esac
+case $out in *'"permissionDecision":"deny"'*'Initialized Git worktree'*'jj operation history are shared'*) ;; *) exit 1 ;; esac
 printf '  ok    Muse retains initialization context when the first tool fails\n'
 
 # Native Muse file tools use relative `path`, resolved against the hook's cwd,
@@ -175,7 +176,7 @@ muse_file_post() {
 }
 rc=0
 out=$(muse_file_post muse-file-path/f 2>&1) || rc=$?
-[ "$rc" = 2 ] && [ -d "$tmp/muse-file-path/.jj/repo" ]
+[ "$rc" = 2 ] && [ -f "$tmp/muse-file-path/.jj/repo" ]
 case $out in *'Initialized Git worktree'*vcs=jj-colocated*) ;; *) exit 1 ;; esac
 (cd "$tmp/muse-file-path" && jj file show f) | grep -q 'native edit'
 printf '  ok    native Muse relative file path initializes a worktree outside cwd\n'
