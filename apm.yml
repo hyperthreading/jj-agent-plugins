@@ -1,5 +1,5 @@
 name: hyperthreading
-version: 0.4.0
+version: 0.5.0
 description: Jujutsu (jj) support for coding agents
 license: MIT
 marketplace:
@@ -12,8 +12,8 @@ marketplace:
     - name: jj-agent
       source: ./plugins/jj-agent
       description: "Make coding agents use Jujutsu (jj) instead of git: workflow skill, git guard, and per-step snapshots"
-      version: 0.4.0
+      version: 0.5.0
     - name: jj-skill
       source: ./plugins/jj-skill
       description: "The jj workflow skill alone, without hooks: for agents that follow the skill without a git guard"
-      version: 0.4.0
+      version: 0.5.0
