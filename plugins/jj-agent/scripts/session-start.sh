@@ -31,6 +31,5 @@ find "${PF%/*}" -type f -mtime +1 -exec rm -f {} + 2>/dev/null
 
 json_get cwd cwd
 scan_dirs "${cwd:-${CLAUDE_PROJECT_DIR:-$PWD}}"
-for r in "${JJ_ROOTS[@]}"; do adopt_new_worktrees "$r"; done
 [ -n "$NEW_CONTEXT" ] && emit_context SessionStart "$NEW_CONTEXT"
 exit 0

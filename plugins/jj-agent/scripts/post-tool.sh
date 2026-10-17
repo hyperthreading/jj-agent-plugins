@@ -19,11 +19,22 @@ json_get cwd cwd; cwd=${cwd:-$PWD}
 fdir=; [ -n "$file" ] && fdir=${file%/*}
 
 # Cheap exit when no candidate is inside a jj repo. pre-tool.sh only records a baseline inside one.
-find_jj_root "$fdir" || find_jj_root "$cwd" || exit 0
+find_jj_root "$fdir" || find_jj_root "$cwd" || {
+  if [ -n "$ADOPTION_CONTEXT" ]; then
+    json_get hook_event_name event
+    emit_context "${event:-PostToolUse}" "$ADOPTION_CONTEXT"
+  fi
+  exit 0
+}
 
 json_get session_id SESSION_ID
 json_get tool_use_id id
 baseline_path "$id"
+if [ -f "$BF.notice" ]; then
+  IFS= read -r note < "$BF.notice"
+  ADOPTION_CONTEXT="$ADOPTION_CONTEXT${ADOPTION_CONTEXT:+ }$note"
+  rm -f "$BF.notice"
+fi
 broot= bop=
 if [ -f "$BF" ]; then
   { IFS= read -r broot; IFS= read -r bop; } < "$BF"
@@ -68,7 +79,6 @@ if command -v jj >/dev/null 2>&1; then
     if [ "$r" = "$broot" ] && [ -n "$bop" ]; then
       git_report "$broot" "$bop" "$BF.index" "$BF.post"   # snapshots as part of it
     else
-      adopt_new_worktrees "$r"
       snapshot "$r"
     fi
   done
@@ -95,10 +105,8 @@ if [ -n "$MUSE_PLUGIN_ID" ]; then
   fi
   # A failed call's result cannot be replaced, and an oversized one must not be: Muse kills a hook
   # whose output passes 16 KiB. The next state-changing call carries the notice.
-  if [ -n "$REPORT" ]; then
-    save_pending undelivered "${msg/ that you just ran in / that you ran earlier in }"
-    exit 0
-  fi
+  save_pending undelivered "${msg/ that you just ran in / that you ran earlier in }"
+  exit 0
 fi
 emit_context "${event:-PostToolUse}" "$msg"
 exit 0

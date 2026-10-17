@@ -27,63 +27,25 @@ json_str() {
   printf -v "$1" '%s' "$_s"
 }
 
-STEP_ARGS=() WT_ADOPTED=
+ADOPTION_CONTEXT=
+ADOPTION_TRIED=()
 
-# Convert git worktree $1 of colocated jj repo $2 into a colocated jj workspace in-place,
-# keeping $1's directory inode (so a shell whose cwd is $1 stays valid) and any untracked/dirty files.
+# Only a worktree actually reached through cwd or a tool path is initialized. No repo-wide sweep.
+# Python is needed only for this one-time path (an OS lock spans both the helper and jj child).
 adopt_git_worktree() {
-  local wt=$1 main=$2 name wlist head branch='' dirty='' stage note
-  [ -d "$wt" ] && [ ! -d "$wt/.jj" ] && [ -f "$wt/.git" ] && [ -d "$main/.jj" ] || return 1
-  command -v jj >/dev/null 2>&1 && command -v git >/dev/null 2>&1 || return 1
-  head=$(JJ_SHIM_OFF=1 git -C "$wt" rev-parse --verify HEAD 2>/dev/null) || return 1
-  branch=$(JJ_SHIM_OFF=1 git -C "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null) || branch=
-  name=${wt##*/}
-  name=${name//[^A-Za-z0-9_-]/_}
-  [ -n "$name" ] && [ "$name" != default ] || name=worktree
-  wlist=$(JJ_SHIM_OFF=1 jj -R "$main" workspace list --ignore-working-copy -T 'name ++ "\n"' 2>/dev/null)
-  while case $'\n'"$wlist"$'\n' in *$'\n'"$name"$'\n'*) true ;; *) false ;; esac; do
-    name="${name}_"
-  done
-  dirty=$(JJ_SHIM_OFF=1 git -C "$wt" status --porcelain --ignored 2>/dev/null)
-  stage="${wt%/*}/.jj-wt-$$"
-  if [ -n "$dirty" ]; then
-    rm -rf -- "$stage" 2>/dev/null
-    mkdir -p "$stage" && cp -R "$wt/." "$stage/" || { rm -rf -- "$stage" 2>/dev/null; return 1; }
-  fi
-  find "$wt" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null
-  JJ_SHIM_OFF=1 git -C "$main" worktree prune >/dev/null 2>&1
-  if ! JJ_SHIM_OFF=1 jj -R "$main" workspace add --colocate --name "$name" -r "$head" "$wt" ${STEP_ARGS[@]+"${STEP_ARGS[@]}"} >/dev/null 2>&1 &&
-     ! JJ_SHIM_OFF=1 jj -R "$main" workspace add --colocate --name "$name" -r "$head" "$wt" >/dev/null 2>&1; then
-    if [ -d "$stage" ]; then
-      cp -R "$stage/." "$wt/" 2>/dev/null
-      rm -rf -- "$stage" 2>/dev/null
-    else
-      JJ_SHIM_OFF=1 git -C "$main" worktree add --detach "$wt" "$head" >/dev/null 2>&1
-      [ -n "$branch" ] && JJ_SHIM_OFF=1 git -C "$wt" checkout -q "$branch" >/dev/null 2>&1
-    fi
-    return 1
-  fi
-  if [ -d "$stage" ]; then
-    rm -rf -- "$stage/.git" "$stage/.jj" 2>/dev/null
-    find "$wt" -mindepth 1 -maxdepth 1 ! -name .jj ! -name .git -exec rm -rf -- {} + 2>/dev/null
-    cp -R "$stage/." "$wt/" 2>/dev/null
-    rm -rf -- "$stage" 2>/dev/null
-    snapshot "$wt"
-  fi
-  if [ -n "$branch" ]; then
-    note="Converted git worktree into colocated jj workspace '$name' (bookmark '$branch' at @-)."
-  else
-    note="Converted git worktree into colocated jj workspace '$name' (@- at ${head:0:12})."
-  fi
-  printf '%s\n' "$note" > "$wt/.jj/jj-agent-wt" 2>/dev/null
-  WT_ADOPTED=1
+  local wt=$1 data=${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/jj-agent} seen note rc
+  for seen in "${ADOPTION_TRIED[@]}"; do [ "$seen" = "$wt" ] && return 1; done
+  ADOPTION_TRIED[${#ADOPTION_TRIED[@]}]=$wt
+  command -v jj >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1 || return 1
+  note=$(python3 "${BASH_SOURCE%/*}/adopt-worktree.py" "$wt" "$data" 2>/dev/null); rc=$?
+  ADOPTION_CONTEXT="${ADOPTION_CONTEXT}${ADOPTION_CONTEXT:+${note:+ }}$note"
+  return "$rc"
 }
 
-# JJ_ROOT <- the jj workspace root containing directory $1 (walks up looking for .jj; no jj
-# process on the common path). If $1 is inside a git worktree whose main repo has .jj, converts
-# the worktree into a colocated jj workspace in-place. Fails if there is none.
+# JJ_ROOT <- the jj workspace root containing directory $1. A .git file is a boundary;
+# initialize a touched worktree of a jj repo without ever falling through to its parent.
 find_jj_root() {
-  local d=$1 l gd main
+  local d=$1 l= gd main data=${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/jj-agent}
   JJ_ROOT=
   [ -n "$d" ] || return 1
   case $d in /*) ;; *) d=$PWD/$d ;; esac
@@ -91,22 +53,24 @@ find_jj_root() {
   case $d in */../*|*/..|*/./*|*/.) d=$(cd "$d" 2>/dev/null && pwd -P) || return 1 ;; esac
   d=${d%/}
   while :; do
-    if [ -d "$d/.jj" ]; then JJ_ROOT=${d:-/}; return 0; fi
-    if [ -f "$d/.git" ]; then
-      IFS= read -r l < "$d/.git" 2>/dev/null || return 1
+    [ ! -f "$d/.git" ] || d=$(cd "$d" 2>/dev/null && pwd -P) || return 1
+    # Retry partial metadata only while this is still a qualifying Git worktree.
+    # A path reused as an ordinary directory/repo must ignore its stale record.
+    if [ -f "$d/.git" ] && { [ ! -d "$d/.jj" ] || [ -f "$data/adoptions$d/pending" ]; }; then
+      IFS= read -r l < "$d/.git" 2>/dev/null || [ -n "$l" ] || return 1
       case $l in 'gitdir: '?*) gd=${l#gitdir: }; gd=${gd%$'\r'} ;; *) return 1 ;; esac
       case $gd in /*) ;; *) gd=$(cd "$d" && cd "$gd" 2>/dev/null && pwd -P) || return 1 ;; esac
-      case $d:$gd in /var/*:/private/var/*) gd=${gd#/private} ;; esac
-      case $gd in
-        */.git/worktrees/*)
-          main=${gd%/.git/worktrees/*}
-          if [ -d "$main/.jj" ] && adopt_git_worktree "$d" "$main"; then
-            JJ_ROOT=$d
-            return 0
-          fi ;;
+      case $gd in */.git/worktrees/*)
+        main=${gd%/.git/worktrees/*}
+        if [ -d "$main/.jj" ]; then
+          adopt_git_worktree "$d" || return 1
+          JJ_ROOT=$d; return 0
+        fi ;;
       esac
+      if [ -d "$d/.jj" ]; then JJ_ROOT=$d; return 0; fi
       return 1
     fi
+    if [ -d "$d/.jj" ]; then JJ_ROOT=${d:-/}; return 0; fi
     [ -n "$d" ] || return 1
     d=${d%/*}
   done
@@ -130,44 +94,11 @@ mark_announced() {
 
 # CTX <- the notice for jj root $1.
 context_for() {
-  local root=$1 mode=jj ver wt_note=
+  local root=$1 mode=jj ver
   [ -e "$root/.git" ] && mode=jj-colocated
-  [ -f "$root/.jj/jj-agent-wt" ] && { IFS= read -r wt_note < "$root/.jj/jj-agent-wt"; }
   ver=$(jj --version 2>/dev/null); ver=${ver#jj }; ver=${ver%%-*}; ver=${ver%% *}
-  printf -v CTX 'vcs=%s at %s (jj %s).%s This directory is a Jujutsu repository: use the jj skill for every version-control action in it. Do not run git commands that change state there: they are blocked where possible, and any git change is reported with a recovery point. Read-only git still works, but prefer jj.' \
-    "$mode" "$root" "${ver:-not found on PATH}" "${wt_note:+ $wt_note}"
-}
-
-# Scan git worktrees of repo $1 for any without .jj and convert them into colocated jj workspaces.
-adopt_new_worktrees() {
-  local root=$1 main=$1 l gd gf wt
-  if [ -f "$root/.git" ]; then
-    IFS= read -r l < "$root/.git" 2>/dev/null || return 0
-    case $l in 'gitdir: '*/.git/worktrees/*)
-      gd=${l#gitdir: }; gd=${gd%$'\r'}
-      case $gd in /*) ;; *) gd=$(cd "$root" && cd "$gd" 2>/dev/null && pwd -P) || return 0 ;; esac
-      main=${gd%/.git/worktrees/*} ;;
-    *) return 0 ;;
-    esac
-  fi
-  [ -d "$main/.jj" ] && [ -d "$main/.git/worktrees" ] || return 0
-  for gf in "$main/.git/worktrees"/*/gitdir; do
-    [ -f "$gf" ] || continue
-    IFS= read -r wt < "$gf" 2>/dev/null || continue
-    wt=${wt%$'\r'}; wt=${wt%/.git}
-    case $wt in /*) ;; *) wt=$(cd "${gf%/*}" && cd "$wt" 2>/dev/null && pwd -P) || continue ;; esac
-    case $root:$wt in /var/*:/private/var/*) wt=${wt#/private} ;; esac
-    if [ -d "$wt" ] && [ ! -d "$wt/.jj" ] && [ -f "$wt/.git" ]; then
-      if adopt_git_worktree "$wt" "$main"; then
-        state_file
-        if ! announced "$wt"; then
-          mark_announced "$wt"
-          context_for "$wt"
-          NEW_CONTEXT="${NEW_CONTEXT:+$NEW_CONTEXT }$CTX"
-        fi
-      fi
-    fi
-  done
+  printf -v CTX 'vcs=%s at %s (jj %s). This directory is a Jujutsu repository: use the jj skill for every version-control action in it. Do not run git commands that change state there: they are blocked where possible, and any git change is reported with a recovery point. Read-only git still works, but prefer jj.' \
+    "$mode" "$root" "${ver:-not found on PATH}"
 }
 
 # For each directory argument: find its jj root, and collect a notice for roots not yet announced.
@@ -187,6 +118,8 @@ scan_dirs() {
       NEW_CONTEXT="${NEW_CONTEXT:+$NEW_CONTEXT }$CTX"
     fi
   done
+  NEW_CONTEXT="$ADOPTION_CONTEXT${ADOPTION_CONTEXT:+${NEW_CONTEXT:+ }}$NEW_CONTEXT"
+  ADOPTION_CONTEXT=
 }
 
 # Emit additionalContext for hook event $1 with text $2.
@@ -252,7 +185,6 @@ git_report() {
   local root=$1 op=$2 pre_idx=$3 post_idx=$4 ops newer='' why='' changed filled p files='' n=0 ignore='' short during
   local paths=()
   REPORT=
-  adopt_new_worktrees "$root"
   # `jj op log` snapshots the working copy first, so this is also the post-command snapshot (named
   # by STEP_ARGS).
   ops=$(jj -R "$root" op log --no-graph -n 50 -T 'id ++ "\t" ++ description.first_line() ++ "\n"' "${STEP_ARGS[@]}" 2>/dev/null) ||
@@ -262,9 +194,7 @@ git_report() {
     ops=$(jj -R "$root" op log --ignore-working-copy --no-graph -T 'id ++ "\t" ++ description.first_line() ++ "\n"' 2>/dev/null) ;;
   esac
   case $ops in *"$op"*) newer=${ops%%"$op"*} ;; esac
-  case $WT_ADOPTED:$newer in
-    :*$'\t'"import git "* | 1:*$'\t'"import git head"*) why='git moved HEAD or refs' ;;
-  esac
+  case $newer in *$'\t'"import git "*) why='git moved HEAD or refs' ;; esac
   if [ -f "$post_idx" ] && [ -f "$pre_idx" ]; then
     # Files whose content changed during the command, and of those, the ones whose index entry
     # git filled in: git wrote them. A refresh alone leaves content unchanged; an edit by anything

@@ -36,7 +36,7 @@ hook_input() { # event cwd tool_use_id tool_name command [more tool_input JSON, 
 make_nojq_path() {
   local d=$tmp/nojq-bin t p dir
   mkdir -p "$d"
-  for t in bash sh jj awk sed grep cut tr cksum dirname cat mkdir printf ls wc chmod head find rm ps basename env cp cmp; do
+  for t in python3 bash sh jj awk sed grep cut tr cksum dirname cat mkdir printf ls wc chmod head find rm ps basename env cp cmp; do
     p=$(type -P "$t") && ln -sf "$p" "$d/$t"
   done
   # real git: the first git on PATH that is not a shim
@@ -181,37 +181,32 @@ run_suite() { # label hook-PATH
   call "./reset-f.sh";                                  expect ".git is a gitdir: file" "git rewrote these files: f"
   repo=$main_repo
 
-  # git worktree add inside a Bash command converts the worktree into a colocated jj workspace.
-  local wt_ext="$tmp/$label/wt-ext"
+  # Creating a Git worktree must neither convert it nor suppress any imported ref change.
+  local wt_ext="$tmp/$label/wt-ext" wt_more="$tmp/$label/wt-more"
   call "git worktree add -q '$wt_ext' -b wt-branch"
-  expect "git worktree add does not report git moved refs" ""
-  case $OUT in *"Converted git worktree into colocated jj workspace 'wt-ext' (bookmark 'wt-branch' at @-)."*)
-    ok "git worktree add announces the converted jj workspace" ;;
-  *) bad "git worktree add announces the converted jj workspace" "got [$OUT]" ;;
-  esac
-  [ -d "$wt_ext/.jj" ] && [ -f "$wt_ext/.git" ] &&
-    [ "$(jj -R "$wt_ext" log --ignore-working-copy --no-graph -r @- -T 'bookmarks' 2>/dev/null)" = "wt-branch" ] &&
-    ok "converted worktree has .jj, .git, and bookmark at @-" ||
-    bad "converted worktree has .jj, .git, and bookmark at @-" "bookmarks=[$(jj -R "$wt_ext" log --ignore-working-copy --no-graph -r @- -T 'bookmarks' 2>/dev/null)]"
+  expect "git worktree add reports the new ref" "git moved HEAD or refs"
+  [ ! -e "$wt_ext/.jj" ] && [ "$(git -C "$wt_ext" symbolic-ref --short HEAD)" = wt-branch ] &&
+    ok "git worktree stays on its branch without .jj" || bad "git worktree stays on its branch without .jj" "$OUT"
+  call "git branch unrelated HEAD && jj util snapshot"
+  call "git worktree add -q '$wt_more' -b wt-more && git branch -f unrelated HEAD~1"
+  expect "worktree creation does not hide unrelated ref moves" "git moved HEAD or refs"
 
-  # A pre-existing git worktree (nested inside the repo, with untracked/dirty files) is converted on first touch.
-  local wt_nes="$repo/.claude/worktrees/wt-nested"
-  mkdir -p "$repo/.claude/worktrees"
-  (cd "$repo" && git worktree add -q --detach "$wt_nes" &&
-    echo SECRET=1 > "$wt_nes/.env" && echo dirty >> "$wt_nes/f") || bad "$label: nested worktree setup" "failed"
-  repo=$wt_nes
-  call "echo in-wt >> g"
-  case $OUT in *"Converted git worktree into colocated jj workspace 'wt-nested'"*)
-    ok "nested git worktree converted and announced on first touch" ;;
-  *) bad "nested git worktree converted and announced on first touch" "got [$OUT]" ;;
-  esac
-  [ -d "$wt_nes/.jj" ] && [ "$(cat "$wt_nes/.env" 2>/dev/null)" = "SECRET=1" ] &&
-    tail -n 1 "$wt_nes/f" | grep -qx dirty &&
-    tail -n 1 "$wt_nes/g" | grep -qx in-wt &&
-    ! tail -n 1 "$main_repo/g" | grep -qx in-wt &&
-    ok "nested worktree preserves untracked/dirty files and isolates @ from parent repo" ||
-    bad "nested worktree preserves untracked/dirty files and isolates @ from parent repo" "f=[$(tail -n 1 "$wt_nes/f")] g=[$(tail -n 1 "$wt_nes/g")] main_g=[$(tail -n 1 "$main_repo/g")]"
-  call "./reset-f.sh";                                  expect "git checkout -- inside converted worktree" "git rewrote these files: f"
+  # First touch initializes the worktree without registering it in the parent's jj repo.
+  repo=$wt_ext
+  user_turn "echo dirty >> f"
+  [ -d "$wt_ext/.jj/repo" ] && [ ! -e "$wt_ext/.jj/jj-agent-wt" ] &&
+    ok "touched worktree gets local jj metadata without a plugin marker" ||
+    bad "touched worktree gets local jj metadata without a plugin marker" "missing or shared repo"
+  call "./reset-f.sh"; expect "adopted worktree reports git rewrites" "git rewrote these files: f"
+  repo=$main_repo
+
+  # An explicitly created jj workspace has .jj beside its .git file and remains protected.
+  local jj_wt="$tmp/$label/jj-workspace"
+  (jj -R "$repo" workspace add --colocate --name explicit "$jj_wt" >/dev/null 2>&1) ||
+    bad "$label: explicit workspace setup" "failed"
+  repo=$jj_wt
+  user_turn "echo keep >> f"
+  call "./reset-f.sh"; expect "explicit colocated workspace still reports git file rewrites" "git rewrote these files: f"
   repo=$main_repo
 
   # Outside a jj repo: no output, nothing written.

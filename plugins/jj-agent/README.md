@@ -2,7 +2,7 @@
 
 Make coding agents use [Jujutsu](https://jj-vcs.github.io/jj/) instead of git, **only in jj repos**. Works with Claude Code (and its subagents), Codex and Muse Code.
 
-The plugin is opt-in per repository: a directory with `.jj/` (from `jj git init` or `jj git clone`) opts in. Everywhere else it does nothing. A repo converted in the middle of a session is picked up without a restart, and a `git worktree` of a jj repo (created by an agent harness or `git worktree add`) is automatically converted in-place into a colocated jj workspace (`jj workspace add --colocate`).
+The plugin is opt-in per repository: a directory with `.jj/` (from `jj git init` or `jj git clone`) opts in. Everywhere else it does nothing. A repo converted in the middle of a session is picked up without a restart, and a `git worktree` of a jj repo is automatically initialized with `jj git init --colocate` when a hook first reaches it through its working directory or a tool file path. Working files stay in place. Git commits and branches remain shared, while jj metadata and operation history belong to the worktree itself.
 
 | Part | What it does |
 |---|---|
@@ -10,10 +10,25 @@ The plugin is opt-in per repository: a directory with `.jj/` (from `jj git init`
 | `scripts/shim/git` | Claude Code only. A `git` wrapper first on the Bash tool's `PATH`. Outside jj repos it hands everything straight to git. Inside a jj repo it lets through calls made by jj itself and read-only git (`rev-parse`, `ls-files`, ...). It blocks anything that changes state and prints the jj equivalent. It checks for `.jj` on every call, so it starts guarding as soon as a repo is converted. |
 | `SessionStart` | Claude Code: puts the shim on `PATH` via `CLAUDE_ENV_FILE`. Both: if the session starts in a jj repo (or a git worktree of one), tells the agent so. |
 | `PreToolUse` (Bash, Edit, Write) | Bash in jj repos only: records the latest operation and a copy of the git index (copy-on-write where possible). It does not snapshot: the previous tool call and the turn start already did. Never rewrites the command. In Muse Code it also holds one call after a git-change report (see below); elsewhere the file tools pass straight through. |
-| `PostToolUse`, `PostToolUseFailure` (Bash) | In jj repos only: snapshots after each edit or command (Claude Code reports a command that exits non-zero as a failure, so both are hooked), so each step lands in `jj op log`, named by the step (see below). After a Bash command it converts any newly added git worktree into a colocated jj workspace and reports git changes with the operation to restore (see below). The first time the agent touches a jj repo in a session (it ran `jj git init`, or `cd`'d into one), it tells the agent once. |
-| `UserPromptSubmit` | In jj repos only: snapshots (named `changes made between turns`), so what you changed between turns (in an editor or your own terminal) is recorded before the agent acts. Also catches a repo converted (or git worktree added) between turns and tells the agent once. |
+| `PostToolUse`, `PostToolUseFailure` (Bash) | In jj repos only: snapshots after each edit or command (Claude Code reports a command that exits non-zero as a failure, so both are hooked), so each step lands in `jj op log`, named by the step (see below). After a Bash command it reports git changes with the operation to restore (see below), including refs created by `git worktree add`. It initializes a raw worktree only when that worktree is actually touched. The first time the agent touches a jj repo in a session (it ran `jj git init`, or `cd`'d into one), it tells the agent once. |
+| `UserPromptSubmit` | In jj repos only: snapshots (named `changes made between turns`), so what you changed between turns (in an editor or your own terminal) is recorded before the agent acts. Also catches a repo converted between turns or initializes the current Git worktree, and tells the agent once. |
 
 Outside jj repos, each hook exits after a directory walk looking for `.jj`. No jj process runs and nothing is added to the agent's context.
+
+## Automatic worktree initialization
+
+This path needs Python 3 with POSIX `fcntl` (macOS/Linux), in addition to jj and Git. Ordinary hooks still use Bash; if Python is unavailable, raw worktrees stay unchanged and remain boundaries.
+
+- Only the checkout reached through `cwd` or a tool's file path is initialized. Creating a worktree from the parent does not initialize it until first touch; other users' and sessions' worktrees are never swept.
+- `jj git init --colocate` adds local `.jj` metadata without moving, copying or deleting working files or pruning Git registrations. Uncommitted changes become `@`, and HEAD may become detached. Worktrees with staged changes are left unchanged and reported: automatic initialization must not discard content that exists only in Git's index.
+- Sparse checkouts, skip-worktree entries and an unborn HEAD also postpone initialization. A copied or manually moved checkout must have its own valid Git worktree registration; mismatches are left unchanged with a repair notice.
+- The initialized worktree is a **separate jj repository backed by the same Git repository**. It does not appear in the parent's `jj workspace list`, and `jj op restore` is local to it. Use bookmarks to share finished work (`jj bookmark set <branch> -r @-` after committing); for a shared jj operation history, create a new checkout explicitly with `jj workspace add --colocate <new-path>`.
+- An OS lock serializes initialization of the same Git worktree. A pending record and errors live under `CLAUDE_PLUGIN_DATA` (or the usual temporary plugin-data directory), never in a project marker. Keep that directory consistent across sessions. An interrupted, loadable `.jj` resumes with a snapshot; incomplete metadata is preserved and reported for inspection, never automatically deleted. Working files and Git registration remain in place even if the hook is killed.
+- Retry records identify the original checkout and Git admin directory, so reusing a path does not resume another worktree's initialization. Muse receives first-PreToolUse initialization notices through the following tool result, or through the next held call if that result cannot carry them.
+- The initialization notice is emitted only when initialization finishes. Later sessions receive the ordinary jj context, without claiming another conversion.
+- Harness cleanup still uses Git's worktree registration. Clean initialized worktrees support `git worktree remove`; dirty ones need the harness's usual explicit discard decision. Before removing any jj checkout, put wanted work on a bookmark: deleting `.jj` also removes its local operation history. No extra workspace record is left in the parent's jj repo.
+
+The design and failure cases are recorded in [ADR 0005](../../docs/adr/0005-safe-worktree-adoption.md).
 
 ## Each snapshot names its step
 
@@ -117,7 +132,8 @@ claude --plugin-dir jj-agent-plugins/plugins/jj-agent
 
 Requirements:
 - `jj` on `PATH`.
-- Nothing else: the hooks parse their input with bash builtins (no jq). They run under `/bin/bash` when it exists, otherwise the `bash` on `PATH`.
+- The hooks parse their input with bash builtins (no jq). They run under `/bin/bash` when it exists, otherwise the `bash` on `PATH`.
+- Automatic Git worktree initialization additionally needs Python 3 with POSIX `fcntl` (macOS/Linux). Without it, worktrees remain unchanged and repo boundaries are still respected.
 
 ## Using it in an existing git repo
 
@@ -135,7 +151,7 @@ jj bookmark track main@origin   # for each remote branch you pull, if jj suggest
 - You keep using git, your IDE and `gh` as before; only the agent's git is guarded. jj keeps git's HEAD detached at `@-`, so `git status` may show a detached HEAD. jj imports whatever you do with git at its next command.
 - To go back to plain git, delete `.jj`. Commits you made only through jj and never put on a bookmark do not become git branches, so set a bookmark on any you want to keep first.
 
-Without `.jj` (plain git repos and other directories) every hook exits silently, writes nothing, and the shim passes every git command straight through. The check walks up from the working directory, so a git repo nested inside a jj working copy counts as part of that jj repo.
+Without `.jj` (plain git repos and other directories) every hook exits silently, writes nothing, and the shim passes every git command straight through. The check walks up from the working directory but stops at a `.git` file. A submodule or a worktree of a plain Git repo is therefore a boundary, and the shim passes Git through there. A nested Git repo with a `.git` directory still falls under the enclosing jj repo unless it has its own `.jj`.
 
 ## Notes
 
