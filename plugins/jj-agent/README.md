@@ -2,16 +2,16 @@
 
 Make coding agents use [Jujutsu](https://jj-vcs.github.io/jj/) instead of git, **only in jj repos**. Works with Claude Code (and its subagents), Codex and Muse Code.
 
-The plugin is opt-in per repository: a directory with `.jj/` (from `jj git init` or `jj git clone`) opts in. Everywhere else it does nothing. A repo converted in the middle of a session is picked up without a restart.
+The plugin is opt-in per repository: a directory with `.jj/` (from `jj git init` or `jj git clone`) opts in. Everywhere else it does nothing. A repo converted in the middle of a session is picked up without a restart, and a `git worktree` of a jj repo (created by an agent harness or `git worktree add`) is automatically converted in-place into a colocated jj workspace (`jj workspace add --colocate`).
 
 | Part | What it does |
 |---|---|
 | `skills/jj` | How to use jj without thinking much: a fixed task loop, an intent→command table, conflict and push recipes, and a `--help` fallback with a legacy→current command map. Verified against jj 0.46. |
 | `scripts/shim/git` | Claude Code only. A `git` wrapper first on the Bash tool's `PATH`. Outside jj repos it hands everything straight to git. Inside a jj repo it lets through calls made by jj itself and read-only git (`rev-parse`, `ls-files`, ...). It blocks anything that changes state and prints the jj equivalent. It checks for `.jj` on every call, so it starts guarding as soon as a repo is converted. |
-| `SessionStart` | Claude Code: puts the shim on `PATH` via `CLAUDE_ENV_FILE`. Both: if the session starts in a jj repo, tells the agent so. |
+| `SessionStart` | Claude Code: puts the shim on `PATH` via `CLAUDE_ENV_FILE`. Both: if the session starts in a jj repo (or a git worktree of one), tells the agent so. |
 | `PreToolUse` (Bash, Edit, Write) | Bash in jj repos only: records the latest operation and a copy of the git index (copy-on-write where possible). It does not snapshot: the previous tool call and the turn start already did. Never rewrites the command. In Muse Code it also holds one call after a git-change report (see below); elsewhere the file tools pass straight through. |
-| `PostToolUse`, `PostToolUseFailure` (Bash) | In jj repos only: snapshots after each edit or command (Claude Code reports a command that exits non-zero as a failure, so both are hooked), so each step lands in `jj op log`, named by the step (see below). After a Bash command it reports git changes with the operation to restore (see below). The first time the agent touches a jj repo in a session (it ran `jj git init`, or `cd`'d into one), it tells the agent once. |
-| `UserPromptSubmit` | In jj repos only: snapshots (named `changes made between turns`), so what you changed between turns (in an editor or your own terminal) is recorded before the agent acts. Also catches a repo converted between turns and tells the agent once. |
+| `PostToolUse`, `PostToolUseFailure` (Bash) | In jj repos only: snapshots after each edit or command (Claude Code reports a command that exits non-zero as a failure, so both are hooked), so each step lands in `jj op log`, named by the step (see below). After a Bash command it converts any newly added git worktree into a colocated jj workspace and reports git changes with the operation to restore (see below). The first time the agent touches a jj repo in a session (it ran `jj git init`, or `cd`'d into one), it tells the agent once. |
+| `UserPromptSubmit` | In jj repos only: snapshots (named `changes made between turns`), so what you changed between turns (in an editor or your own terminal) is recorded before the agent acts. Also catches a repo converted (or git worktree added) between turns and tells the agent once. |
 
 Outside jj repos, each hook exits after a directory walk looking for `.jj`. No jj process runs and nothing is added to the agent's context.
 

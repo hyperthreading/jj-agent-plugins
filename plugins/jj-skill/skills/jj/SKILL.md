@@ -44,7 +44,7 @@ jj commit -m "feat: ..."    # 3. Done: final message for @, and a fresh empty @ 
 - The finished change is `@-`. An empty, undescribed `@` on top of it is normal.
 - Several tasks in a row, or several logical steps in one task: repeat 1–3 for each.
 - A small fix to the task just finished is not a new task: make it in the empty `@`, then `jj squash -u`.
-- Parallel tasks share one working copy and mix their edits in `@`. Give each its own `jj workspace add <path>`.
+- Parallel tasks share one working copy and mix their edits in `@`. Give each its own `jj workspace add <path>`. In a workspace converted from a `git worktree` (announced with `bookmark '<name>' at @-`), advance that bookmark after committing (`jj bookmark set <name> -r @-`) so tools inspecting the worktree branch see your finished change.
 
 ## Intent → command
 

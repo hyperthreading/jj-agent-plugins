@@ -68,6 +68,7 @@ if command -v jj >/dev/null 2>&1; then
     if [ "$r" = "$broot" ] && [ -n "$bop" ]; then
       git_report "$broot" "$bop" "$BF.index" "$BF.post"   # snapshots as part of it
     else
+      adopt_new_worktrees "$r"
       snapshot "$r"
     fi
   done

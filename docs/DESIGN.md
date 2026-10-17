@@ -14,7 +14,7 @@ coding agent(Claude Code, Codex, Muse Code)가 jj repo에서는 git 대신 jj를
 
 ## 원칙
 
-- **jj repo에서만 동작한다.** 각 hook은 `.jj`를 찾아 디렉터리를 거슬러 올라가는 것으로 시작한다. 없으면 jj 프로세스를 띄우지 않고 바로 끝난다. repo를 `jj git init`으로 바꾸는 순간부터 동작한다. 세션 중간이어도 같다.
+- **jj repo에서만 동작한다.** 각 hook은 `.jj`를 찾아 디렉터리를 거슬러 올라가는 것으로 시작한다. 없으면 jj 프로세스를 띄우지 않고 바로 끝난다. repo를 `jj git init`으로 바꾸는 순간부터 동작한다. 세션 중간이어도 같다. 본체 repo가 jj repo인 곳에서 만든 `git worktree`(harness가 세션을 열기 전에 만든 worktree나 명령으로 추가한 worktree)는 만나는 즉시 같은 자리에서 colocated jj workspace(`jj workspace add --colocate`)로 바꾸고 안내한다. 본체에 `.jj`가 없는 일반 git worktree는 건드리지 않는다.
 - **jj를 쓰게 하는 것은 skill이다.** 차단과 감지는 그 뒤를 받친다. agent가 skill을 잘 따른다면 hook 없이 skill만 담은 `plugins/jj-skill`을 대신 설치할 수 있다. skill 파일은 두 plugin에 같은 내용으로 복사해 두고 `tests/skill-sync-test.sh`로 확인한다. symlink는 plugin cache 복사, APM, Windows checkout에서의 동작을 보장할 수 없어서 쓰지 않는다.
 - **명령을 고쳐 쓰지 않는다.** 명령 문자열을 분석해서 막지 않고, 명령 전후의 실제 상태를 비교한다. 그래야 스크립트 안의 git도 잡히고, agent의 승인 규칙이나 화면 표시에 영향을 주지 않는다.
 - **stable component를 조합한다.** jj의 public 명령(`op log`, `diff`, `util snapshot`, `at_operation()`), git의 public 명령(`ls-files --debug`), 각 agent의 public hook protocol만 쓴다. 상태 저장소나 daemon을 새로 만들지 않는다.
@@ -27,7 +27,7 @@ plugins/jj-agent/
 ├── skills/jj/SKILL.md      # jj 작업 절차, 의도→명령 표, 충돌·push 절차, --help fallback
 ├── hooks/hooks.json        # 아래 hook 5개
 └── scripts/
-    ├── lib.sh              # 공용 함수 (입력 파싱, repo 탐색, 감지, Muse 보류 상태)
+    ├── lib.sh              # 공용 함수 (입력 파싱, repo 탐색, worktree 전환, 감지, Muse 보류 상태)
     ├── session-start.sh    # SessionStart
     ├── user-prompt.sh      # UserPromptSubmit
     ├── pre-tool.sh         # PreToolUse (Bash|Edit|Write|MultiEdit|NotebookEdit)
@@ -39,10 +39,10 @@ plugins/jj-agent/
 |---|---|
 | skill `jj` | 모든 버전 관리 작업을 jj로 한다. jj 0.46 기준이며, 명령이 실패하면 `--help`로 확인하는 절차가 있다 |
 | git shim | Claude Code에서 SessionStart가 `CLAUDE_ENV_FILE`로 PATH 맨 앞에 넣는다. jj repo 안에서 상태를 바꾸는 git(commit, checkout, reset, stash 등)을 막고 jj 명령을 안내한다. 읽기 전용 git과 jj가 내부에서 부르는 git은 통과시킨다. `JJ_SHIM_OFF=1`이면 그대로 git을 부른다 |
-| SessionStart | shim을 PATH에 넣는다(Claude Code). 세션이 jj repo에서 시작하면 그 사실을 알린다. 오래된 상태 파일을 지운다 |
-| UserPromptSubmit | snapshot한다. 사용자가 turn 사이에 바꾼 것을 agent가 움직이기 전에 기록해 둔다. turn 사이에 jj repo가 된 곳도 여기서 알린다 |
+| SessionStart | shim을 PATH에 넣는다(Claude Code). 세션이 jj repo(또는 jj repo의 git worktree)에서 시작하면 그 사실을 알린다. 오래된 상태 파일을 지운다 |
+| UserPromptSubmit | snapshot한다. 사용자가 turn 사이에 바꾼 것을 agent가 움직이기 전에 기록해 둔다. turn 사이에 jj repo가 된 곳이나 새로 만든 git worktree도 여기서 알린다 |
 | PreToolUse | Bash 명령 전에 baseline(마지막 op id와 git index 사본)을 남긴다. Muse에서는 보류된 알림이 있으면 이 호출을 한 번 막는다 |
-| PostToolUse, PostToolUseFailure | 매 편집과 명령 뒤에 snapshot해서 각 단계가 `jj op log`에 남게 한다. snapshot op에는 그 단계의 이름(`jj-agent.step`)이 붙는다. Bash 명령 뒤에는 git 변경을 판정하고 알린다 |
+| PostToolUse, PostToolUseFailure | 매 편집과 명령 뒤에 snapshot해서 각 단계가 `jj op log`에 남게 한다. snapshot op에는 그 단계의 이름(`jj-agent.step`)이 붙는다. Bash 명령 뒤에는 새로 추가된 git worktree를 colocated jj workspace로 전환하고, git 변경을 판정해 알린다 |
 
 ## agent별 동작
 

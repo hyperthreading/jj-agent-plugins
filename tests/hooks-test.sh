@@ -181,6 +181,39 @@ run_suite() { # label hook-PATH
   call "./reset-f.sh";                                  expect ".git is a gitdir: file" "git rewrote these files: f"
   repo=$main_repo
 
+  # git worktree add inside a Bash command converts the worktree into a colocated jj workspace.
+  local wt_ext="$tmp/$label/wt-ext"
+  call "git worktree add -q '$wt_ext' -b wt-branch"
+  expect "git worktree add does not report git moved refs" ""
+  case $OUT in *"Converted git worktree into colocated jj workspace 'wt-ext' (bookmark 'wt-branch' at @-)."*)
+    ok "git worktree add announces the converted jj workspace" ;;
+  *) bad "git worktree add announces the converted jj workspace" "got [$OUT]" ;;
+  esac
+  [ -d "$wt_ext/.jj" ] && [ -f "$wt_ext/.git" ] &&
+    [ "$(jj -R "$wt_ext" log --ignore-working-copy --no-graph -r @- -T 'bookmarks' 2>/dev/null)" = "wt-branch" ] &&
+    ok "converted worktree has .jj, .git, and bookmark at @-" ||
+    bad "converted worktree has .jj, .git, and bookmark at @-" "bookmarks=[$(jj -R "$wt_ext" log --ignore-working-copy --no-graph -r @- -T 'bookmarks' 2>/dev/null)]"
+
+  # A pre-existing git worktree (nested inside the repo, with untracked/dirty files) is converted on first touch.
+  local wt_nes="$repo/.claude/worktrees/wt-nested"
+  mkdir -p "$repo/.claude/worktrees"
+  (cd "$repo" && git worktree add -q --detach "$wt_nes" &&
+    echo SECRET=1 > "$wt_nes/.env" && echo dirty >> "$wt_nes/f") || bad "$label: nested worktree setup" "failed"
+  repo=$wt_nes
+  call "echo in-wt >> g"
+  case $OUT in *"Converted git worktree into colocated jj workspace 'wt-nested'"*)
+    ok "nested git worktree converted and announced on first touch" ;;
+  *) bad "nested git worktree converted and announced on first touch" "got [$OUT]" ;;
+  esac
+  [ -d "$wt_nes/.jj" ] && [ "$(cat "$wt_nes/.env" 2>/dev/null)" = "SECRET=1" ] &&
+    tail -n 1 "$wt_nes/f" | grep -qx dirty &&
+    tail -n 1 "$wt_nes/g" | grep -qx in-wt &&
+    ! tail -n 1 "$main_repo/g" | grep -qx in-wt &&
+    ok "nested worktree preserves untracked/dirty files and isolates @ from parent repo" ||
+    bad "nested worktree preserves untracked/dirty files and isolates @ from parent repo" "f=[$(tail -n 1 "$wt_nes/f")] g=[$(tail -n 1 "$wt_nes/g")] main_g=[$(tail -n 1 "$main_repo/g")]"
+  call "./reset-f.sh";                                  expect "git checkout -- inside converted worktree" "git rewrote these files: f"
+  repo=$main_repo
+
   # Outside a jj repo: no output, nothing written.
   local data2=$tmp/$label/data-plain
   r=$( (hook_input PreToolUse "$tmp/$label/plain" x Bash "git commit" | CLAUDE_PLUGIN_DATA=$data2 PATH=$hook_path $HB "$P/pre-tool.sh"
@@ -290,14 +323,14 @@ muse_post mu13 '{\n  \"exit_code\": 0,\n  \"output\": \"'"$big"'\"\n}'
   ok "result over 16 KiB: left as it is, the notice goes to the next call" || bad "result over 16 KiB: left as it is, the notice goes to the next call" "rc=$MRC err=${#MERR} bytes, pending=$(head -n 1 "$pending" 2>&1)"
 rm -f "$pending"
 
-echo "== no .jj (plain git repo, plain directory)"
+echo "== no .jj (plain git repo, plain git worktree, plain directory)"
 # Where there is no .jj the plugin must be inert: every hook silent, nothing written, no jj repo
 # created, and git through the shim behaves exactly like git.
-g=$tmp/plain-git d=$tmp/plain-dir data3=$tmp/data-nojj
+g=$tmp/plain-git gw=$tmp/plain-wt d=$tmp/plain-dir data3=$tmp/data-nojj
 mkdir -p "$g" "$d"
 (cd "$g" && git init -q && git config user.email t@example.com && git config user.name t &&
-  echo a > a && git add a && git commit -qm first) || bad "plain git repo setup" "git init failed"
-for dir in "$g" "$d"; do
+  echo a > a && git add a && git commit -qm first && git worktree add -q "$gw" -b wt-plain) || bad "plain git repo setup" "git init failed"
+for dir in "$g" "$gw" "$d"; do
   r=$(
     : > "$tmp/env-nojj"
     hook_input SessionStart "$dir" s1 x x | CLAUDE_ENV_FILE=$tmp/env-nojj CLAUDE_PLUGIN_DATA=$data3 $HB "$P/session-start.sh"
