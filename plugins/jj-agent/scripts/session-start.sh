@@ -31,9 +31,9 @@ find "${PF%/*}" -type f -mtime +1 -exec rm -f {} + 2>/dev/null
 
 json_get cwd cwd
 scan_dirs "${cwd:-${CLAUDE_PROJECT_DIR:-$PWD}}"
-if [ -d "${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/jj-agent}/managed-workspaces" ] && command -v python3 >/dev/null 2>&1; then
+if [ -d "${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/jj-agent}/managed-workspaces" ] && command -v python3 >/dev/null 2>&1 && command -v jj >/dev/null 2>&1; then
   for r in "${JJ_ROOTS[@]}"; do
-    python3 "${BASH_SOURCE%/*}/adopt-worktree.py" --cleanup "$r" "${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/jj-agent}" 2>/dev/null
+    python3 "${BASH_SOURCE%/*}/adopt-worktree.py" --cleanup "$r" "${CLAUDE_PLUGIN_DATA:-${TMPDIR:-/tmp}/jj-agent}" >/dev/null 2>&1
   done
 fi
 [ -n "$NEW_CONTEXT" ] && emit_context SessionStart "$NEW_CONTEXT"

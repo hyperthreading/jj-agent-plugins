@@ -136,8 +136,8 @@ Muse는 hook의 `additionalContext`를 요청 맨 앞의 developer 메시지에 
 | `baselines/<tool_use_id>`, `.index`, `.post`, `.notice` | Bash 명령 1회의 baseline op와 index 사본, Muse 초기화 안내 | PostToolUse가 지운다. 남은 것(중단, 거부)은 하루 뒤 SessionStart가 지운다 |
 | `pending/<session_id>` | Muse에서 보류한 알림. 1행은 `delivered`나 `undelivered`, 그 뒤는 명령이나 알림 본문 | 다음 상태 변경 호출이 지운다. 하루 지난 것은 SessionStart가 지운다 |
 | `adoptions/<physical-worktree-path>/pending`, `last-error` | 대상 worktree/admin 식별 정보를 포함한 초기화 중단 기록과 오류 | 성공하면 pending을 지운다. 경로가 재사용되면 이전 기록을 적용하지 않는다. 불완전 metadata의 오류는 검토를 위해 남긴다 |
-| `adoptions/<physical-worktree-path>/refused-<session-hash>` | 거절 사유와 index/HEAD/ref/config/등록 signature | signature가 바뀌면 재검사하고, 같은 session/state에서는 재안내하지 않는다 |
-| `managed-workspaces/<repo-hash>/<name>.json` | 완료한 plugin workspace의 실제 Git 경로와 식별 정보 | SessionStart가 삭제된 Git checkout의 workspace만 forget한다 |
+| `adoptions/<physical-worktree-path>/refused-<session-hash>` | 거절 사유와 index/HEAD/ref/config/등록/부모 경로 signature | signature가 바뀌면 재검사하고, 같은 거절 사유는 재안내하지 않는다 |
+| `managed-workspaces/<repo-hash>/<name>.json` | 완료한 plugin workspace의 실제 Git 경로와 식별 정보 | SessionStart가 checkout과 Git admin이 모두 제거된 workspace만 forget한다 |
 | `adoption-locks/<git-admin-path-hash>` | worktree 초기화 OS 잠금의 inode | 파일은 유지하고 잠금은 프로세스 종료 시 해제한다 |
 
 ## 성능

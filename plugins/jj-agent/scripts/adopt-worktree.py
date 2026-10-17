@@ -26,6 +26,15 @@ def identity(path):
     return [info.st_dev, info.st_ino]
 
 
+def missing(path):
+    # Inaccessible paths and dangling symlinks are not evidence of deletion.
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return True
+    return False
+
+
 def signature(paths):
     result = []
     for path in paths:
@@ -76,7 +85,7 @@ def adopt(worktree, data, session='default'):
     refusal = state / ('refused-' + hashlib.sha256(session.encode()).hexdigest())
     # A cache hit performs only stat/read operations: no Git/jj subprocesses and
     # no repeated notice. Index, refs, config or registration changes invalidate it.
-    watched = [wt, gitfile, wt / '.jj', gd, gd / 'index', gd / 'HEAD', gd / 'gitdir',
+    watched = [wt, wt.parent, gitfile, wt / '.jj', gd, gd / 'index', gd / 'HEAD', gd / 'gitdir',
                gd / 'commondir', gd / 'config.worktree', gd / 'info/sparse-checkout',
                main / '.git/config', main / '.git/packed-refs',
                main / '.git/info/sparse-checkout', main / '.jj', pending, Path(__file__)]
@@ -90,6 +99,7 @@ def adopt(worktree, data, session='default'):
     watched.extend([Path(os.environ.get('GIT_CONFIG_GLOBAL', '~/.gitconfig')).expanduser(),
                     Path(os.environ.get('XDG_CONFIG_HOME', '~/.config')).expanduser() / 'git/config'])
     current_signature = signature(watched)
+    cached = {}
     if refusal.exists():
         cached = json.loads(refusal.read_text())
         if cached.get('signature') == current_signature:
@@ -97,7 +107,9 @@ def adopt(worktree, data, session='default'):
 
     def refuse(reason):
         atomic_json(refusal, {'reason': reason, 'signature': signature(watched)})
-        print(f'jj-agent: left Git worktree {wt} unchanged because {reason}')
+        # A stat-only index refresh requires a recheck, not another identical notice.
+        if cached.get('reason') != reason:
+            print(f'jj-agent: left Git worktree {wt} unchanged because {reason}')
         return 1
 
     env = dict(os.environ, JJ_SHIM_OFF='1')
@@ -158,9 +170,12 @@ def adopt(worktree, data, session='default'):
 
         if preflight():
             return 1
-        refusal.unlink(missing_ok=True)
         if saved is None:
-            stage = Path(tempfile.mkdtemp(prefix='.jj-agent-', dir=wt.parent))
+            try:
+                stage = Path(tempfile.mkdtemp(prefix='.jj-agent-', dir=wt.parent))
+            except PermissionError:
+                return refuse('its parent directory does not permit creating temporary jj metadata. '
+                              'Restore parent-directory write access before automatic jj initialization.')
             saved = {'identity': ident, 'worktree': str(wt), 'main': str(main),
                      'stage': str(stage), 'name': 'jj-agent-' + uuid.uuid4().hex,
                      'phase': 'prepare'}
@@ -197,6 +212,7 @@ def adopt(worktree, data, session='default'):
             saved['phase'] = 'complete'
             atomic_json(registry, saved)
             pending.unlink()
+            refusal.unlink(missing_ok=True)
             try:
                 stage.rmdir()
             except OSError:
@@ -214,30 +230,37 @@ def adopt(worktree, data, session='default'):
 
 
 def cleanup(root, data):
-    """Forget only completed plugin workspaces whose Git checkout is gone."""
+    """Forget only completed workspaces after Git removes their registration."""
     root = Path(root).resolve()
     records = Path(data) / 'managed-workspaces' / hashlib.sha256(os.fsencode(repo_dir(root))).hexdigest()
     if not records.is_dir():
         return 0
     for record in records.glob('*.json'):
-        saved = json.loads(record.read_text())
-        wt = Path(saved['worktree'])
-        if wt.exists():
+        try:
+            saved = json.loads(record.read_text())
+            if saved['phase'] != 'complete':
+                continue
+            wt = Path(saved['worktree'])
+            gd = Path(saved['identity']['gitdir'])
+            with lock_path(data, gd).open('a') as lock:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    continue
+                # Missing paths may be unrepaired moves or unavailable volumes.
+                # Git remove/prune deletes the admin directory; its presence is
+                # enough to retain the workspace, even with a stale backlink.
+                if not missing(wt) or not missing(gd):
+                    continue
+                result = subprocess.run(['jj', '-R', str(root), 'workspace', 'forget', '--ignore-working-copy', saved['name']],
+                                        env=dict(os.environ, JJ_SHIM_OFF='1'), stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE, pass_fds=(lock.fileno(),))
+                if result.returncode == 0:
+                    record.unlink()
+        except (OSError, ValueError, KeyError, TypeError):
+            # Preserve unreadable/invalid records and continue with other owned
+            # workspaces. Cleanup must never add text to the hook's JSON output.
             continue
-        gd = Path(saved['identity']['gitdir'])
-        with lock_path(data, gd).open('a') as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                continue
-            # Git worktree move/repair may have relocated it. Never forget that.
-            if (gd / 'gitdir').exists() and registered_gitfile(gd).parent.exists():
-                continue
-            result = subprocess.run(['jj', '-R', str(root), 'workspace', 'forget', '--ignore-working-copy', saved['name']],
-                                    env=dict(os.environ, JJ_SHIM_OFF='1'), stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, pass_fds=(lock.fileno(),))
-            if result.returncode == 0:
-                record.unlink()
     return 0
 
 
@@ -247,5 +270,6 @@ if __name__ == '__main__':
             sys.exit(cleanup(*sys.argv[2:]))
         sys.exit(adopt(*sys.argv[1:]))
     except (OSError, ValueError, IndexError) as error:
-        print(f'jj-agent: could not initialize this Git worktree: {error}')
+        print(f'jj-agent: could not initialize this Git worktree: {error}',
+              file=sys.stderr if '--cleanup' in sys.argv[1:2] else sys.stdout)
         sys.exit(1)

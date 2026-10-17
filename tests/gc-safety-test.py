@@ -177,6 +177,79 @@ class SharedRepository(unittest.TestCase):
         self.assertEqual(self.names(), before)
         self.jj(moved, 'status')
 
+    def test_session_cleanup_retains_unrepaired_move_and_wip_identity(self):
+        self.adopt()
+        self.jj(self.wt, 'commit', '-m', 'completed step')
+        self.snapshot(self.wt, 'work in progress\n')
+        self.jj(self.wt, 'describe', '-m', 'WIP must survive a move')
+        template = 'change_id ++ "\\n" ++ description'
+        before = self.jj(self.wt, 'log', '--no-graph', '-r', '@', '-T', template)
+        names = self.names()
+        records = list(self.data.glob('managed-workspaces/*/*.json'))
+        moved = self.base / 'unrepaired-move'
+        self.wt.rename(moved)
+        self.hook(self.main)
+        self.assertEqual(self.names(), names)
+        self.assertTrue(all(p.exists() for p in records))
+        self.git(self.main, 'worktree', 'repair', str(moved))
+        self.assertEqual(self.jj(moved, 'log', '--no-graph', '-r', '@', '-T', template), before)
+        self.assertEqual((moved / 'f').read_text(), 'work in progress\n')
+        self.git(self.main, 'worktree', 'remove', '--force', str(moved))
+        self.hook(self.main)
+        self.assertEqual(self.names(), {'default'})
+        self.assertFalse(any(p.exists() for p in records))
+
+    def test_cleanup_keeps_missing_checkout_until_git_registration_is_removed(self):
+        self.adopt()
+        names = self.names()
+        admin = Path((self.wt / '.git').read_text().strip()[8:])
+        shutil.rmtree(self.wt)
+        self.assertTrue(admin.is_dir())
+        self.hook(self.main)
+        self.assertEqual(self.names(), names)
+        self.git(self.main, 'worktree', 'prune', '--expire=now')
+        self.assertFalse(admin.exists())
+        self.hook(self.main)
+        self.assertEqual(self.names(), {'default'})
+
+    def test_malformed_cleanup_records_do_not_corrupt_json_or_stop_valid_cleanup(self):
+        self.adopt()
+        record = next(self.data.glob('managed-workspaces/*/*.json'))
+        directory = record.parent
+        saved = record.read_text()
+        # Insert invalid records before the valid one, so abort-on-error would
+        # leave the owned workspace behind. Both parse and schema errors matter.
+        record.unlink()
+        invalid = [directory / '000-invalid.json', directory / '001-invalid.json']
+        invalid[0].write_text('{broken')
+        invalid[1].write_text('{}')
+        record.write_text(saved)
+        self.git(self.main, 'worktree', 'remove', str(self.wt))
+        result = json.loads(self.hook(self.main, session='cleanup-json'))
+        self.assertEqual(result['hookSpecificOutput']['hookEventName'], 'SessionStart')
+        self.assertEqual(self.names(), {'default'})
+        self.assertTrue(all(p.exists() for p in invalid))
+
+    def test_missing_jj_leaves_cleanup_records_and_valid_hook_output(self):
+        self.adopt()
+        record = next(self.data.glob('managed-workspaces/*/*.json'))
+        self.git(self.main, 'worktree', 'remove', str(self.wt))
+        minimal = self.base / 'minimal-bin'
+        minimal.mkdir()
+        for name, target in (('python3', sys.executable),
+                             ('mkdir', '/bin/mkdir'), ('find', '/usr/bin/find')):
+            (minimal / name).symlink_to(target)
+        old_path = self.env['PATH']
+        try:
+            self.env['PATH'] = str(minimal)
+            result = json.loads(self.hook(self.main, session='no-jj'))
+            self.assertEqual(result['hookSpecificOutput']['hookEventName'], 'SessionStart')
+            self.assertTrue(record.exists())
+        finally:
+            self.env['PATH'] = old_path
+        self.hook(self.main)
+        self.assertFalse(record.exists())
+
     def call_count(self):
         return len(self.calls.read_text().splitlines()) if self.calls.exists() else 0
 
@@ -196,6 +269,37 @@ class SharedRepository(unittest.TestCase):
         self.assertIn('staged changes', self.hook(session='new-session'))
         self.assertGreater(self.call_count(), count)
         self.git(self.wt, 'restore', '--staged', 'f')
+        self.adopt()
+
+    def test_index_stat_refresh_rechecks_without_repeating_same_refusal(self):
+        (self.wt / 'f').write_text('staged\n')
+        self.git(self.wt, 'add', 'f')
+        self.assert_cached('staged changes')
+        admin = Path((self.wt / '.git').read_text().strip()[8:])
+        index = admin / 'index'
+        before = index.stat()
+        os.utime(index, ns=(before.st_atime_ns, before.st_mtime_ns + 1))
+        count = self.call_count()
+        self.assertNotIn('left Git worktree', self.hook())
+        self.assertGreater(self.call_count(), count)
+        count = self.call_count()
+        self.assertNotIn('left Git worktree', self.hook())
+        self.assertEqual(self.call_count(), count)
+        self.git(self.wt, 'config', 'core.sparseCheckout', 'true')
+        self.assertIn('sparse checkout', self.hook())
+
+    @unittest.skipIf(os.geteuid() == 0, 'root bypasses directory write permissions')
+    def test_unwritable_parent_refusal_is_cached_until_permissions_change(self):
+        parent = self.base / 'read-only-parent'
+        parent.mkdir()
+        moved = parent / 'wt'
+        self.git(self.main, 'worktree', 'move', str(self.wt), str(moved))
+        self.wt = moved
+        parent.chmod(0o555)
+        try:
+            self.assert_cached('parent directory does not permit')
+        finally:
+            parent.chmod(0o755)
         self.adopt()
 
     def test_sparse_refusal_retries_when_config_and_index_change(self):

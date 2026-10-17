@@ -14,12 +14,12 @@ PR #5의 첫 구현은 작업 파일을 복사·삭제·복원하고 Git 등록�
 ## Decision
 
 1. `.git` 파일은 repo 탐색 경계다. 상대 gitdir와 마지막 줄바꿈 없는 파일을 처리하고 submodule·malformed 파일에서는 부모로 넘어가지 않는다. cwd 또는 tool file path로 직접 만난 worktree만 연결한다. 다른 worktree를 전환하는 전체 순회와 ref 보고 예외는 두지 않는다.
-2. Git admin의 backlink와 common dir를 확인한다. staged-only 내용, sparse/skip-worktree, unborn HEAD 또는 잘못된 등록은 그대로 두고 안내한다. 거절은 plugin data에 session별로 cache하며, index/HEAD/ref/config/등록 signature가 바뀌면 다시 검사한다. cache hit에는 Git/jj 호출이나 중복 알림이 없다.
+2. Git admin의 backlink와 common dir를 확인한다. staged-only 내용, sparse/skip-worktree, unborn HEAD 또는 잘못된 등록은 그대로 두고 안내한다. 부모 디렉터리 권한 때문에 임시 metadata를 만들 수 없는 경우도 거절한다. 거절은 plugin data에 session별로 cache하며, index/HEAD/ref/config/등록/부모 디렉터리 signature가 바뀌면 다시 검사한다. cache hit에는 Git/jj 호출이나 중복 알림이 없다. metadata 갱신 후 같은 거절 사유가 확인되어도 다시 안내하지 않는다. 그 밖의 초기화 실패에는 기존 진단·재시도 동작을 유지한다.
 3. worktree와 같은 부모 아래에 고유한 빈 임시 디렉터리를 만든다. 본체에서 `jj workspace add --ignore-working-copy --no-colocate --sparse-patterns full --name <unique> -r 'root()' <tmp>`를 실행한다. `root()`의 tree가 비어 있으므로 작업 파일은 생성되지 않는다. 본체 working copy도 snapshot하지 않는다.
 4. 새 `.jj/.gitignore`를 준비하고 **생성한 metadata 디렉터리만** `<tmp>/.jj`에서 `<worktree>/.jj`로 rename한다. 같은 깊이의 형제 디렉터리라 `.jj/repo`의 상대 경로는 그대로 본체 저장소를 가리킨다. 작업 디렉터리 자체, `.git`, 기존 파일 및 삭제된 파일은 건드리지 않는다.
 5. 대상에서 `jj util snapshot`을 실행한다. jj 0.46은 새 workspace의 colocation을 감지하고 기존 Git HEAD를 import한 다음 파일을 snapshot한다. 실제 삭제는 계속 삭제로 남는다. 대상에서 `sparse reset`을 실행해 삭제된 파일을 재생성하는 중간 상태도 만들지 않는다. **Git과 jj 저장소를 모두 공유**하므로 GC의 보존 참조 소유자는 하나다.
 6. 실제 Git admin 경로에 따른 POSIX `flock`을 사용하고 자식 jj에 fd를 전달한다. helper만 죽어도 자식 종료까지 잠금이 남는다. pending 기록은 대상·admin identity, 임시 경로, workspace 이름, 생성 metadata identity를 보관한다. 중단 시 새 workspace를 중복 생성하지 않고 준비·연결·snapshot을 재개한다. 읽을 수 없는 metadata는 지우지 않고 오류 로그를 안내한다. 서로 다른 plugin-data 경로는 잠금을 공유하지 않으므로 일관된 설정이 필요하다.
-7. 완료한 workspace의 실제 경로와 identity를 plugin data에 기록한다. SessionStart는 같은 repo에서 plugin이 완료한 workspace 중 Git checkout이 사라진 것만 `jj workspace forget --ignore-working-copy`로 정리한다. Git이 기록한 이동 경로가 존재하면 보존한다. unrelated explicit workspace와 진행 중인 초기화는 건드리지 않는다.
+7. 완료한 workspace의 실제 경로와 identity를 plugin data에 기록한다. SessionStart는 같은 repo에서 plugin이 완료한 workspace 중 checkout과 Git admin 디렉터리가 모두 제거된 것만 `jj workspace forget --ignore-working-copy`로 정리한다. 등록이 남아 있으면 수동 이동 후 repair 전 상태나 일시 미접근 경로일 수 있으므로 보존한다. 경로 검사 오류도 삭제의 증거로 보지 않는다. unrelated explicit workspace와 진행 중인 초기화는 건드리지 않는다. 손상되거나 읽을 수 없는 정리 기록은 남기고 다음 기록을 처리하며, cleanup 출력이 hook JSON에 섞이지 않게 한다.
 8. 완료 안내는 한 번 전달한다. Muse PreToolUse에서는 baseline 옆에 보관했다가 실제 도구 결과로 전달하며 실패·큰 결과에서는 다음 호출을 보류한다(ADR 0002). Native Muse `path`는 hook cwd 기준으로 해석한다. HEAD/ref 변경 보고는 초기화와 무관하게 유지한다.
 
 ## Consequences and limits
