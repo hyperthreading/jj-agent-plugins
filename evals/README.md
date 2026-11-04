@@ -2,6 +2,8 @@
 
 This directory prepares the six pilot cases and the `git-script` and plain-Git controls, generates all five arms, records passive Git Trace2 evidence, and grades repository outcomes. It does not launch a model. `plan.yaml` is deliberately unapproved until the client/model, repetition count, cost/time ceilings and stop conditions are agreed. The `.yaml` files use JSON syntax (a YAML subset) so these tools need only Python's standard library.
 
+The selected OpenCode pilot model is `opencodex/gpt-6.1-terra#medium`. `native_clients` records Codex's `gpt-6.1-terra` and Claude Code's `claude-sonnet-5-5`, both with medium effort. OpenCode's catalog confirms the pilot reference and medium variant; native client availability and effort controls still need verification by the launchers. Model selection does not approve execution: cost/time/step limits remain unset and `approved` remains false.
+
 ## Model-free checks
 
 ```bash

@@ -1,7 +1,11 @@
 {
   "approved": false,
   "client": "opencode",
-  "model": null,
+  "model": "opencodex/gpt-6.1-terra#medium",
+  "native_clients": {
+    "codex": {"model": "gpt-6.1-terra", "effort": "medium"},
+    "claude": {"model": "claude-sonnet-5-5", "effort": "medium"}
+  },
   "cases": ["basic", "dirty-wc", "mid-stack", "megamerge-route", "branch-alone", "multi-turn-external"],
   "arms": ["nudge", "skills", "static", "l0-l2", "default"],
   "repeats": 1,
