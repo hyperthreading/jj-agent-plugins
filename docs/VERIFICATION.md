@@ -1,35 +1,67 @@
-# Shared guidance implementation checks
+# Shared guidance verification
 
-Date: 2026-11-05. This is an isolated implementation candidate, not an adoption or release decision. The implementation starts from `f36f98bda089231e84a2066fed4adb30d541d241` and is developed in `/Users/jun/workspace/jj-agent-guidance-shared`. The original `random/jj-agent-plugins` checkout is not used as the runtime installation under test.
+2026-11-05. **Acceptance is incomplete; the model campaign is stopped.** Actual installation and first-request delivery have now been exercised in OpenCode, Codex and Claude Code. Eight mandatory smoke runs passed. Claude's external-change run failed the current-workspace preservation condition and was interrupted; three Git controls and the comparison pilot remain unexecuted.
 
-## Reproduce
+The shared runtime is fixed at `npsksrqk` / `0d46dd937a3fdb4d3959ed8d6bcbcab233ac5e9f`; compass is fixed at `trlyksxs` / `403f8994a5f3e6ea302c9463944c467368b555c7` and retains that shared pin. Evaluation changes are developed in `/Users/jun/workspace/jj-agent-guidance-shared`. The original live plugin checkout was not the runtime under test. Packages remain unpublished at 0.4.0.
+
+## Model-free checks
 
 ```bash
 bash scripts/isolated.sh bash scripts/check.sh
-bash scripts/isolated.sh python3 tests/guidance-bench.py
 ```
 
-The wrapper creates private HOME/XDG, jj/Git configuration and client data directories. Run it from this checkout. It does not copy credentials. For any actual client run, inspect system/managed and ancestor configuration sources as well; private HOME alone does not establish isolation.
-
-## Results
+The final run passed:
 
 | Check | Result |
 |---|---|
-| Generated preamble/task loop and both skill distributions | Match |
-| Shared state fixtures | 7 cases pass in bash and compass TS; the unnamed-merge branch spelling is the only declared difference |
-| Packaged guidance, defaults, independent L0/L1 and lifecycle | 13 tests pass |
-| Grader fixtures | 9 tests pass, including wrong-change edits, script-internal Git loss without import op, and unknown for missing/truncated/background evidence |
-| Enabled safeguards, full/minimal PATH, Muse recovery | 104 checks pass |
-| Whole prompt/reset latency | Recorded in [BENCHMARK.md](../BENCHMARK.md); 30,000-file edited prompt p50 132.17ms, p95 137.92ms |
+| Generated preamble/task flow and both skill distributions | Match |
+| Shared state fixtures | 7 cases; bash and previously verified compass TS agree except the declared unnamed-merge spelling |
+| Packaged guidance, defaults, independent L0/L1 and lifecycle | 13 tests |
+| Grader | 10 tests, including preserved history with changed workspace contents |
+| Client control | 29 tests: admission, crash accounting, protocol usage, real loopback mock exchanges, cleanup, preservation stop and normalization |
+| Enabled safeguards, full/minimal PATH, Muse recovery | 104 checks |
+| Runtime-source pin consistency | 13 shared-source files at the pinned revision match 15 generated compass files |
 
-The packaged-hook tests copy the plugin or its scripts to a new directory; the APM-style test removes that plugin copy and runs only the copied script tree. They establish file self-containment, not that the APM installer produced those files. APM CLI is not installed in this environment, so `apm pack --check-versions` and actual APM installation have not run. Package versions remain at the existing 0.4.0; this candidate has not been published.
+The earlier compass typecheck, 70 tests, GUI build and 14 separately installed tarball tests remain the runtime verification baseline. This change adds evaluation code and documentation. Final check logs and hashes are indexed in [the campaign evidence](../evals/results/2026-11-05/README.md).
 
-The state-error test reproduces a snapshot failure while ordinary recorded-state reads still work. It verifies that the hook reports stale state instead of emitting the old state as current. Existing detection regressions continue to cover recovery and the known false-positive/mid-turn gaps.
+Whole-hook latency remains in [BENCHMARK.md](../BENCHMARK.md): at 30,000 files, edited-prompt p50/p95 was 132.17/137.92ms. Prompt/reset snapshots are retained to see external edits despite exceeding the 100ms target. The existing safeguard suite still reproduces its known detection false positive and mid-turn external-edit gap; passing it does not resolve those limitations.
 
-## Remaining actual-client evidence
+## Actual-client evidence
 
-No model evaluation has run. Budget and model selection are pending in [evals/plan.yaml](../evals/plan.yaml). The eval code currently prepares cases/arms, validates deterministic outcomes and normalizes candidate client log shapes. A selected-client launcher still needs isolated installation, session resume/compaction control, verified full observation and spend/step enforcement. See [evals/README.md](../evals/README.md).
+Clients: OpenCode 2.2.5, Codex 0.166.0, Claude Code 2.1.312; jj 0.46.0, Bun 1.4.4, APM 0.35.0. OpenCode and Codex used GPT-6.1 Terra / medium; Claude used Sonnet 5.5 / medium. Final client HTTP requests were captured at the loopback proxy before upstream dispatch, in addition to OpenCode's hook-time context and registration inventory.
 
-Claude Code, Codex and OpenCode still require actual first-request, unchanged-request, external-change, workspace-switch, clear/resume/compaction delivery checks, final skill selection/body checks and the mandatory behavioral smoke. Client-specific controls for opting out of individual packaged skills must be confirmed there. Muse L1 and OpenCode L4 remain deferred. Passing model-free checks does not establish the design's C1–C7 completion or a comparative benefit.
+- Isolated local-marketplace installs for Codex and Claude, copied compass installation, initial L0/current L1 and both skill advertisements passed. OpenCode registered both canonical skill bodies and loaded only the expected non-builtin plugins.
+- APM `pack --check-versions --offline`, local installation, and native Codex/Claude APM delivery captures passed. This replaces the earlier APM-style-only evidence.
+- L0-off, L1-off and standalone-skill captures passed in all three clients. Codex's per-path `skills.config` disabled the packaged `jj` advertisement. Claude's `Skill(jj-agent:jj)` deny rule did not hide it; independent packaged-skill replacement remains unresolved.
+- Native resume and external-state delivery have actual evidence. Workspace switching, clear and in-turn compaction remain unverified. A resumed process is not a substitute for same-process unchanged-turn deduplication.
 
-The OpenCode implementation records the exact shared source revision in its `src/agent/SHARED_VERSION` and keeps its adapter/package verification with the accepted design.
+| Mandatory smoke | OpenCode | Codex | Claude |
+|---|---|---|---|
+| `basic` | Pass | Pass | Pass |
+| `dirty-wc` | Pass | Pass | Pass |
+| `multi-turn-external` | Pass | Pass | Interrupted; preservation condition failed |
+| Git `control` | Not run | Not run | Not run |
+
+These are one-off smoke results, not reliability estimates. The three initial paid basic attempts remain `unknown` because of launcher/environment or observation problems; raw first failures and earlier grades were retained. Total accounting includes those attempts: **12 paid attempts, 69 forwarded requests, $2.182575 API-equivalent usage, $0 pending reservations**. The approved ceilings were $30/90 minutes total and $1/3 minutes/30 requests per run. The stop condition, rather than the budget, ended execution.
+
+## Preservation stop
+
+On turn 3 Claude ran `jj new main -m "Add feature.txt"` before writing and committing the task file. The current workspace's `user.txt` consequently became `base\n` instead of the protected `external user work\n`. The `user-wip` change's tree, description, parent change IDs, bookmark and file content remain intact. The failing request included fresh L1 naming `external user draft`, `user-wip` and `M user.txt`.
+
+This is an observed workspace-content violation, not proven destruction of the protected change. The interrupted run remains **unknown with observed failures**. A deterministic regression now reproduces the distinction. The ledger's preservation stop remains authoritative; no further model calls or ledger reset are authorized by the old approval.
+
+Post-stop review added terminal preservation checking, request-settlement waiting before ledger release, cleanup on error, portable host-home paths and more complete provenance hashes for future runs. These refinements passed model-free checks; the stopped campaign did not execute this final launcher revision.
+
+## C1–C7
+
+| Criterion | Evidence now available | Remaining requirement |
+|---|---|---|
+| C1 Default installation | Native marketplace/APM and compass initial L0/L1/L2 delivery; OpenCode canonical body registration | Loaded skill-body/selection checks not completed for both skills on every installation path |
+| C2 Independent configuration | Default L3/L4-off, L0/L1-off and standalone captures; adapter and hook combinations; Codex `jj` opt-out | Claude packaged-skill independence; remaining actual-client per-skill combinations |
+| C3 State/lifecycle | Shared fixtures, adapter/hook cases, initial delivery, native resume, external-edit delivery | Same-process unchanged-turn deduplication, workspace switch, clear and in-turn compaction |
+| C4 Standalone/source consistency | Complete task flow, both standalone advertisements, generated-source checks and fixed compass pin | Final selected/loaded standalone bodies on every native path |
+| C5 Behavior/preservation | Eight accepted smoke passes; first attempts and stop investigation retained | Decide workspace-preservation contract, resolve/retest stopped case, run all three Git controls |
+| C6 Grader | Ten deterministic cases plus actual-client normalization; unknown stays distinct from observed failure | No known fixture failure; coverage limitations remain explicit for interrupted or unobserved execution |
+| C7 Regression/reproduction | Runtime suites, 29 control tests, isolation captures, installation/configuration/usage evidence and hashes | Final post-stop launcher changes have model-free verification only; complete client acceptance remains open |
+
+The comparative conclusion is **inconclusive: the pilot did not start**. No adoption or release decision follows from the smoke passes. [ADR 0005](adr/0005-budgeted-guidance-validation.md) records the stop and the decisions needed before any renewed campaign.

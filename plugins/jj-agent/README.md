@@ -157,6 +157,8 @@ Set environment variables before starting the client, or through its supported h
 
 Both skills are packaged independently of these hook options. The clients' skill controls determine which packaged or external skills load; avoid duplicate names. OpenCode's distribution has separate `commandSkill` and `workflow` registration options.
 
+Actual-client captures confirmed Codex can hide the packaged `jj` skill with `[[skills.config]]`, its installed `SKILL.md` path and `enabled=false`. In Claude Code 2.1.312, denying `Skill(jj-agent:jj)` left its description advertised. Independent replacement of a Claude packaged skill is therefore still unverified.
+
 Earlier versions enabled safeguards and worktree conversion automatically. To retain those behaviors:
 
 ```bash
@@ -168,7 +170,7 @@ Turning all safeguards off leaves preamble/state delivery working. For state-onl
 
 The state renderer uses four read-only jj queries after snapshot preparation. It sends at most 15 changed paths, workspace and branch context, and conflict/divergence/mid-stack warnings. Failed snapshot preparation produces an error, not old state presented as current. `sessions/<id>.state` includes the workspace path, so moving between workspaces invalidates deduplication. A context reset sends both enabled layers again without waiting for another prompt.
 
-Hook input/output paths are covered by deterministic tests. Actual client delivery after compaction and the three-client behavioral smoke remain to be verified with an agreed model-call budget; see [evaluation preparation](../../evals/README.md).
+Hook input/output paths are covered by deterministic tests. Isolated marketplace and actual APM installs delivered initial preamble/state and both skill advertisements in Codex and Claude. The three-client campaign passed eight smoke runs, then stopped when Claude branched away from protected workspace contents; the protected user change itself remained intact. Compaction/workspace-switch delivery, skill-independence gaps and remaining smoke checks are still open. See [evaluation results](../../evals/results/2026-11-05/README.md) and [verification](../../docs/VERIFICATION.md).
 
 ## Notes
 

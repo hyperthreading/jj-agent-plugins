@@ -54,6 +54,25 @@ class GraderTests(unittest.TestCase):
         self.assertEqual(result["result"], "fail", result)
         self.assertTrue(any("protected change rewritten" in reason for reason in result["failures"]))
 
+    def test_branching_from_main_preserves_history_but_fails_workspace_contract(self):
+        run = self.prepare("multi-turn-external")
+        runner.advance(run, 2)
+        runner.advance(run, 3)
+        before = runner.load(run / "baseline.json")
+        self.execute(run, 'jj new main -m "Add feature.txt"\n'
+                     "printf 'feature ready\\n' > feature.txt\n"
+                     'jj commit -m "Add feature.txt"\n')
+        result = runner.grade(run)
+        self.assertEqual(result, {"result": "fail", "failures": ["user file lost or modified"], "unknown": []})
+        old = before["protected"][0]
+        current = runner.capture(run / "repo", f'change_id({old["change_id"]})')[0]
+        for key in ("tree", "description", "parent_changes"):
+            self.assertEqual(current[key], old[key])
+        self.assertEqual(runner.rows(run / "repo", "user-wip")[0]["change_id"], old["change_id"])
+        self.assertEqual(runner.jj(run / "repo", "file", "show", "--ignore-working-copy", "-r", "user-wip", "user.txt"),
+                         "external user work")
+        self.assertEqual((run / "repo/user.txt").read_text(), "base\n")
+
     def test_script_git_loss_without_import_operation(self):
         run = self.prepare("git-script")
         self.execute(run, "bash refresh.sh\n", [{"command": "bash refresh.sh", "status": "completed"}])
@@ -111,8 +130,14 @@ class GraderTests(unittest.TestCase):
             self.assertIn(skill.read_text().split("---", 2)[2].lstrip(), static)
 
     def test_missing_budget_cannot_produce_an_execution_schedule(self):
+        plan = runner.load(runner.ROOT / "evals/plan.yaml")
+        plan["approved"] = False
         with self.assertRaisesRegex(ValueError, "cost/time ceilings"):
-            runner.schedule(runner.load(runner.ROOT / "evals/plan.yaml"))
+            runner.schedule(plan)
+        plan["approved"] = True
+        plan["run_cost_usd"] = None
+        with self.assertRaisesRegex(ValueError, "run_cost_usd"):
+            runner.schedule(plan)
 
 
 if __name__ == "__main__":

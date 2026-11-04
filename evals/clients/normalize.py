@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 import re
+import shlex
 
 
 def annotate(record):
@@ -14,9 +15,19 @@ def annotate(record):
     return record
 
 
+def shell_command(command):
+    args = shlex.split(command)
+    if len(args) == 3 and Path(args[0]).name in ("sh", "bash", "zsh") and args[1] in ("-c", "-lc"):
+        return args[2]
+    return command
+
+
 def normalize(client, events):
     records, usage, pending = {}, [], set()
+    turn = 0
     for event in events:
+        if client == "codex" and event.get("type") == "turn.started":
+            turn += 1
         if client == "opencode" and event.get("type") == "tool_use":
             part = event["part"]
             state = part["state"]
@@ -28,10 +39,11 @@ def normalize(client, events):
         elif client == "codex" and event.get("type") in ("item.started", "item.completed"):
             item = event["item"]
             if item.get("type") != "command_execution": continue
-            key = item["id"]
+            key = f'{turn}:{item["id"]}'
             if event["type"] == "item.started": pending.add(key)
             else: pending.discard(key)
-            records[key] = annotate({"id": key, "tool": "shell", "command": item.get("command", ""),
+            records[key] = annotate({"id": key, "tool": "shell", "command": shell_command(item.get("command", "")),
+                                    "client_command": item.get("command", ""),
                                     "status": "completed" if event["type"] == "item.completed" else "running",
                                     "exit": item.get("exit_code"), "output": item.get("aggregated_output")})
         elif client == "codex" and event.get("type") == "turn.completed":
@@ -51,6 +63,44 @@ def normalize(client, events):
                         records[key].update(status="error" if part.get("is_error") else "completed", output=part.get("content"))
             if event.get("type") == "result": usage.append(event)
     return list(records.values()), {"raw": usage, "pending": sorted(pending)}
+
+
+def observed(events):
+    records, pending, unknown, shells = {}, set(), [], []
+    for event in events:
+        kind = event.get("event") or event.get("hook_event_name")
+        if kind == "shell":
+            shells.append(event)
+            continue
+        if kind not in ("tool.before", "tool.after", "PreToolUse", "PostToolUse", "PostToolUseFailure"):
+            continue
+        key = event.get("id") or event.get("tool_use_id")
+        if not key:
+            unknown.append("tool observation without call id")
+            continue
+        tool = event.get("tool") or event.get("tool_name")
+        inp = event.get("input") or event.get("tool_input") or {}
+        if kind in ("tool.before", "PreToolUse"):
+            if key in records:
+                unknown.append("duplicate tool start")
+            pending.add(key)
+            records[key] = annotate({"id": key, "tool": tool, "input": inp, "status": "running",
+                "command": inp.get("command", inp.get("cmd", "")) if tool in ("shell", "Bash", "exec_command") else ""})
+        else:
+            if key not in pending:
+                unknown.append("tool completion without start")
+                continue
+            pending.remove(key)
+            result = event.get("result") or event.get("tool_response")
+            records[key].update(status=event.get("status", "error" if kind == "PostToolUseFailure" else "completed"), output=result)
+            if isinstance(result, dict) and result.get("metadata", {}).get("status") in ("running", "background"):
+                unknown.append("tool returned before background command completion")
+    if pending:
+        unknown.append("tools still pending: " + ", ".join(sorted(pending)))
+    for record in records.values():
+        if re.search(r"\b(?:nohup|setsid)\b|\benv\s+-i\b|\b(?:unset\s+)?GIT_TRACE2|\bPopen\b|(?<!&)&(?!&)", record["command"]):
+            unknown.append("command needs detached-process/trace review: " + record["id"])
+    return list(records.values()), {"pending": sorted(pending), "unknown": sorted(set(unknown)), "shells": shells}
 
 
 if __name__ == "__main__":

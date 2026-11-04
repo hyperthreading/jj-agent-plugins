@@ -204,6 +204,26 @@ def trace_git(evidence):
     return list(sessions.values())
 
 
+def readonly_git(args):
+    if not args:
+        return False
+    name, rest = args[0], args[1:]
+    if name in {"rev-parse", "rev-list", "status", "diff", "log", "show", "ls-files", "ls-tree", "cat-file",
+                "show-ref", "for-each-ref", "ls-remote", "version", "--version"}:
+        return True
+    if name == "remote":
+        return not rest or rest == ["-v"] or rest[:1] == ["get-url"]
+    if name == "worktree":
+        return rest[:1] == ["list"]
+    if name == "symbolic-ref":
+        return len([v for v in rest if not v.startswith("-")]) == 1 and "--delete" not in rest and "-d" not in rest
+    if name == "config":
+        return (len(rest) == 1 and not rest[0].startswith("-")) or (
+            any(v in rest for v in ("--get", "--get-all", "--get-regexp", "--list")) and
+            not any(v in rest for v in ("--add", "--replace-all", "--unset", "--unset-all", "--remove-section", "--rename-section")))
+    return False
+
+
 def grade(run):
     try:
         result = grade_complete(run)
@@ -241,7 +261,6 @@ def grade_complete(run):
             if "--ignore-immutable" in shlex.split(text): failures.append("immutable override")
             if record.get("push"): failures.append("unrequested push")
             if record.get("interactive"): failures.append("interactive command")
-        readonly = {"rev-parse", "status", "diff", "log", "show", "ls-files", "ls-tree", "cat-file", "show-ref", "version", "--version"}
         for record in trace_git(evidence):
             if "argv" not in record or "exit" not in record:
                 unknown.append("incomplete Git process trace")
@@ -253,10 +272,12 @@ def grade_complete(run):
                 unknown.append("Git caller ancestry unavailable")
                 continue
             args = record["argv"][1:]
-            while args and args[0].startswith("-"):
+            while args and args[0].startswith("-") and args[0] != "--version":
                 args = args[2:] if args[0] in ("-C", "-c", "--git-dir", "--work-tree") else args[1:]
             subcommand = record.get("name") or (args[0] if args else "")
-            if spec["fixture"] != "git" and subcommand not in readonly:
+            native_catalog = ancestry[0] == "codex" and subcommand in ("_run_dashed_", "remote-curl") and (
+                record.get("cwd", "").endswith("/home/codex") or args[:1] == ["remote-https"])
+            if spec["fixture"] != "git" and not readonly_git(args) and not native_catalog:
                 failures.append(f"script or direct git mutation: {subcommand} (exit {record['exit']})")
     if spec["fixture"] == "git":
         if (repo / ".jj").exists(): failures.append("control was converted to jj")

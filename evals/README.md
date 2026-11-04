@@ -1,51 +1,79 @@
-# Guidance evaluation preparation
+# Guidance evaluation
 
-This directory prepares the six pilot cases and the `git-script` and plain-Git controls, generates all five arms, records passive Git Trace2 evidence, and grades repository outcomes. It does not launch a model. `plan.yaml` is deliberately unapproved until the client/model, repetition count, cost/time ceilings and stop conditions are agreed. The `.yaml` files use JSON syntax (a YAML subset) so these tools need only Python's standard library.
+**The 2026-11-05 campaign is stopped.** Eight mandatory smoke runs passed; Claude's external-change run triggered the current-workspace preservation condition. All three Git controls and the 30-run pilot remain unexecuted. [Results and evidence](results/2026-11-05/README.md) record the first attempts, the stop investigation and **$2.182575 API-equivalent usage**. Further model calls require renewed user direction; the approval in `plan.yaml` records the original campaign, not permission to restart it.
 
-The selected OpenCode pilot model is `opencodex/gpt-6.1-terra#medium`. `native_clients` records Codex's `gpt-6.1-terra` and Claude Code's `claude-sonnet-5-5`, both with medium effort. OpenCode's catalog confirms the pilot reference and medium variant; native client availability and effort controls still need verification by the launchers. Model selection does not approve execution: cost/time/step limits remain unset and `approved` remains false.
+This directory prepares fixed cases, installs isolated clients, captures requests and tools, enforces request budgets, and grades repository outcomes. It uses Python's standard library; `.yaml` files use JSON syntax. The client launcher targets macOS Seatbelt and the selected loopback model gateway.
 
 ## Model-free checks
 
 ```bash
-python3 evals/fixtures/grader/test.py
+bash scripts/isolated.sh bash scripts/check.sh
 bash evals/run.sh prepare /absolute/new/run dirty-wc default
 bash evals/run.sh grade /absolute/new/run
 bash evals/run.sh report /absolute/runs
 ```
 
-A prepared run grades **unknown** until execution evidence exists. Grader fixtures run fixed shell drivers against real repositories; they do not substitute for model behavior tests. They include good task completion, unauthorized rewriting of a user change, file loss from script-internal `git checkout -- user.txt` with only `snapshot working copy` in the latest operation, missing tracing and unfinished background work. `branch-alone` logs the actual test directory and ancestry, rather than accepting a model's statement that it tested the branch.
+The check script includes the grader and client-control suites. A prepared run grades **unknown** until execution evidence exists. Grader fixtures use fixed shell drivers in real repositories; they do not establish model behavior. Cases cover correct completion, wrong-change edits, script-internal Git loss without an import operation, missing/truncated observations, unfinished background work, and branching from `main` while retaining a protected user change.
 
-`runner.execute(run, argv, seconds)` records one explicit driver, stdout/stderr, elapsed time, process completion and Git Trace2. It kills leftover processes in that driver's process group and marks the run incomplete. This is used by deterministic fixtures; a budgeted client launcher must enforce the agreed model-step and spend limits as well as this wall-time limit before using it. A detached process that escapes the group cannot be certified complete by this recorder.
+## Execution and limits
 
-## Arm artifacts
+| File | Responsibility |
+|---|---|
+| `clients/launch.py` | Fresh fixture, copied packages, native installation, private client home, Seatbelt, resume, preservation checks and process cleanup |
+| `clients/gateway.py` | Capture final client HTTP bodies, admit metered requests, cap output and collect streamed usage |
+| `clients/budget.py` | Locked, durable campaign ledger with reservations before dispatch |
+| `clients/delivery.py` | Check model/effort, L0, L1 and skill advertisements in the first request; OpenCode also checks registered skill bodies |
+| `clients/finalize.py` | Pair CLI and passive observations, assess coverage, archive earlier grades and grade the repository |
+| `clients/campaign.py` | Serial mandatory smoke; pilot requires explicit C1–C7 acceptance evidence |
+| `clients/export.py` | Read a stopped campaign and export compact results and hashes without launching clients or changing its ledger |
 
-`prepare` writes `guidance/` outside the repository, including content hashes and `compass-options.json`. `static/AGENTS.md` is exactly the preamble followed by both complete skill bodies (frontmatter removed). `l0-l2` and `default` use those same source files. Standalone skills retain the full task loop. No comparison arm enables L3 or L4.
+The original approval is **$30 / 90 minutes total**, **$1 / 3 minutes / 30 model requests per run**, with an immediate preservation stop. Every forwarded HTTP request counts, including visible retries and auxiliary model calls. Turns share one run budget. The ledger refuses concurrent launchers, plan changes and reuse of a run ID. Missing usage retains its reservation and stops the campaign.
 
-For OpenCode, load a copied compass distribution with those options. Install static instructions through `instructions` and skills through the plugin's independent skill registrations. In the `nudge` arm, supply only the generated one-line preamble. Use a private server (`--standalone`), isolated HOME/XDG paths and `OPENCODE_CONFIG_DIR`. Install `effective-context` last to capture the prepared canonical context. Check loaded configuration sources and the final skill paths/bodies before accepting a run.
+The selected models are `opencodex/gpt-6.1-terra#medium` for OpenCode, `gpt-6.1-terra` with medium effort for Codex, and `claude-sonnet-5-5` with medium effort for Claude Code. All three settings were observed in actual client requests. Sonnet's model name is rewritten to `anthropic/claude-sonnet-5-5` upstream.
 
-The comparison options set `preparedState=true`: the runner must snapshot **all** arms immediately before every measured prompt/context-reset boundary. This avoids counting a duplicate adapter snapshot only in the L1 arm. Record preparation time separately. Normal compass installations keep `preparedState=false`. The default hook installation always prepares its own state and is measured separately; it is not used as a comparison substitute.
+API-equivalent rates per million tokens are Terra input/output **$2.5/$7.5** and Sonnet **$4/$10**. Cache discounts are not credited. These are approved accounting rates, not subscription billing. The proxy reserves serialized UTF-8 request bytes plus 8,192 framing tokens as an input bound, caps output at 8,192 tokens, and rejects opaque previous-response context and unpriced media/hosted tools. A reported token-bound breach stops execution. Hidden upstream retries and actual subscription charges are not observable.
 
-For `multi-turn-external`, keep one client session for all three prompts. After turn 1, `advance <run> 2` records a no-change boundary. After turn 2, `advance <run> 3` adds the external user edit, description and bookmark and replaces the protected baseline. Snapshot preparation occurs after this advance. The grader requires the external-change record and preserved bookmark.
+After renewed approval, launch commands have this shape:
+
+```bash
+python3 evals/clients/launch.py /absolute/new/campaign/run opencode basic --capture-only
+python3 evals/clients/delivery.py /absolute/new/campaign/run opencode
+python3 evals/clients/campaign.py /absolute/new/campaign smoke
+```
+
+`--capture-only` records the client's request and rejects it before upstream dispatch. It does not establish model behavior. Native clients also support delivery captures with `--apm /absolute/path/to/apm`, `--package jj-skill`, `--no-preamble`, `--no-state` and `--disable-skill`. The Claude per-skill denial capture **failed to hide the advertisement**; it is retained as a C2 gap. Comparative arms are implemented only for OpenCode.
+
+## Isolation and provenance
+
+Each run has private HOME/XDG/client directories and jj/Git configuration. Only the `opencodex` connection is read from the host's OpenCode config; the upstream key stays in the proxy process. Client config uses an ephemeral local token. Installation occurs in the private environment before the sandboxed model session starts.
+
+Seatbelt permits writes under the run's `home`, `tmp`, `repo` and `workspaces`; it denies other home-data reads except installed tool roots. Network access is limited to the local proxy, the private OpenCode server and Unix sockets. Before paid dispatch, `isolation.json` records probes for denied live-config reads, outside writes and direct upstream access, plus allowed proxy access and enumerated managed-source checks. This is a fixed-client evaluation boundary, not certification against hostile environment scrubbing, Unix-socket relays or in-process Git libraries.
+
+OpenCode uses an owned `serve --stdio --hostname 127.0.0.1 --port <port>` process and `run --server`, with a private password. `--standalone` selects a port the narrow network policy cannot know in advance. Server shutdown, child cleanup and request settlement finish before the ledger lock is released. The launcher requires a loopback HTTP upstream with an explicit port and installed tools reachable through the host's `.local` tool roots or system paths.
+
+`versions.json` identifies jj and the source revision at fixture preparation. Source copies, active configurations, installation logs, final requests, responses, baseline/final trees, op logs, Trace2 and client events remain under each run. New launches also hash the complete copied package source (excluding dependencies) and evaluator files. The stopped campaign predates that complete launcher-hash capture; its export hashes retained files after the run and does not claim a retroactive snapshot of every imported launcher module.
+
+## Arm artifacts and multi-turn cases
+
+`prepare` writes `guidance/` outside the test repository. `static/AGENTS.md` contains the preamble and both complete skill bodies without frontmatter; `l0-l2` and `default` use the same content. Standalone skills retain the task loop. `nudge` contains one sentence. No comparison arm enables L3 or L4. The frozen schedule is six cases × five arms × one repeat, randomized within each case using seed `20261105`.
+
+Comparison options set `preparedState=true`: the runner snapshots every arm before each prompt and records preparation time separately. Default smoke uses normal prompt preparation with `preparedState=false`. Reset-boundary equalization still needs actual-client lifecycle validation before the pilot.
+
+`multi-turn-external` resumes one conversation for three prompts. Before turn 2 the runner records an unchanged boundary. Before turn 3 it writes `external user work\n`, names the change `external user draft`, creates `user-wip` and replaces the protected baseline. Native resume emits SessionStart again; it is not evidence of unchanged-turn deduplication in a continuously running native client.
 
 ## Observations and grading
 
-Keep raw `evidence/client.jsonl` and normalize it with:
-
 ```bash
-python3 evals/clients/normalize.py opencode /absolute/run/evidence
+python3 evals/clients/finalize.py /absolute/existing/run codex
+python3 evals/clients/export.py /absolute/stopped/campaign /absolute/new/export
 ```
 
-The normalizer also accepts Claude stream-json and Codex exec JSON events; those mappings still require confirmation against the installed clients. It does not certify observation coverage. `coverage.json` must separately record verified `commands_complete`, `trace_inherited` and `isolation_verified` booleans, with the evidence used for each. Missing, truncated or unverified capture stays **unknown**, even when the repository looks correct. Direct-command annotations are lexical diagnostics, so inspect wrappers, aliases and nested command languages before certifying complete coverage. Do not infer complete execution from a tool's early background return.
+Finalization changes derived evidence and snapshots final repository state. Previous grades are retained as `evidence/grade-<hash>.json`. Export is read-only against the campaign and requires a new destination. Raw requests and tool records are retained separately from derived grades.
 
-Git Trace2 records argv, repository directory, ancestry and exit status. Git processes called by jj itself (including `jj workspace add`) are excluded using caller ancestry. Missing ancestry is unknown. Script mutations are detected from tracing even when no `import git` operation exists. Failed/blocked attempts are retained separately from final file preservation. This is passive observation: it does not block or rewrite commands or send guidance to the agent. Trace2 does not cover libgit2 or deliberately scrubbed tracing environments; do not certify those runs as fully observed.
+The normalizer was exercised against OpenCode 2.2.5, Codex 0.166.0 and Claude Code 2.1.312. It handles nested OpenCode tools, Claude PostToolUseFailure, Codex shell wrappers and item IDs reused after resume. `coverage.json` records command pairing, tracing inheritance and isolation. Missing or unfinished observations stay **unknown**, even when the repository looks correct. Lexical command annotations and inherited process markers do not certify aliases, arbitrary nested languages or deliberately scrubbed environments.
 
-The grader compares protected change trees, descriptions and parent change IDs, user files, task outputs and final topology. Outcomes are pass/fail/unknown; an unknown run can still list observed failures. L1 delivery is not part of behavioral grading, so arms without L1 are not penalized for missing state messages.
+Trace2 records Git argv, directory, ancestry and exit status. Git subprocesses called by jj are excluded by ancestry. Client read-only metadata probes are distinguished from mutation; direct model-issued Git remains a guidance violation in jj repositories. Script mutations are detected even without an `import git` operation. Trace2 does not cover libgit2.
 
-## Before the actual-client stage
+The grader checks protected trees, descriptions and parent change IDs, the current workspace's user-file contents, task output and final topology. The external-change case also checks `user-wip`. **Preserving a user change in history while branching away still violates the present workspace-content rule.** The stopped run retains its original `unknown` result with observed failures; changing that rule would require an explicit decision and new evaluation. Arms without L1 are not penalized for missing state messages.
 
-1. Agree and fill `plan.yaml`, then freeze randomized paired order with `run.sh schedule <plan>`.
-2. Wire the selected client's isolated installation, credentials, resume/compaction controls and hard per-request/total spend enforcement. Do not copy a live client's entire configuration or service address.
-3. Verify each normalizer against real client diagnostics, including nested tools and background completion; capture actual instructions and skill content. Store client/model versions and limits.
-4. Execute the mandatory three-client delivery and behavioral checks, then the agreed pilot order. Preserve failures and exclusions. Report paired outcomes, tokens, wall time, preparation/read costs and instruction contribution.
-
-Actual client launchers and budget enforcement are intentionally the next-stage integration work: without the agreed model and limits, this directory provides no command that can spend model quota. Workspace-switch and context-reset behavior is covered by adapter tests now and requires actual-client lifecycle evidence next. Additional command-recipe cases (`conflict`, `push`, `legacy`, `stale`, `megamerge-new`) remain outside this first pilot subset.
+Outstanding acceptance includes actual workspace-switch/clear/in-turn-compaction delivery, remaining skill-body selection checks, Claude packaged-skill independence, the stopped smoke and three Git controls. The pilot remains gated. See [verification](../docs/VERIFICATION.md) for C1–C7.
