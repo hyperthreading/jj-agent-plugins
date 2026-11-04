@@ -1,0 +1,6 @@
+Where the jj working copy was at the latest user message or context reset. It is not refreshed after every tool call; run `jj st` or `jj log` for the current state.
+Repository: <ROOT> (jj, colocated with Git).
+Workspace: default
+@ (working copy): <WC> (no description) (empty), no file changes
+@- (parent): <PARENT> "base"
+Nearest bookmark: none among the ancestors of @ that were read

@@ -1,0 +1,1 @@
+We are building the left and right branches together in this working merge. Change left.txt to `left fixed` and right.txt to `right fixed`, each with a final newline. Put each edit into its own branch and leave the combined working area clean. Do not push.

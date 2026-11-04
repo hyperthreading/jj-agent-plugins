@@ -22,6 +22,7 @@ real_git() {
 }
 
 # Escape hatch for humans/scripts that really need it.
+[ "${JJ_AGENT_GUARD:-0}" = 1 ] || real_git "$@"
 [ -n "$JJ_SHIM_OFF" ] && real_git "$@"
 
 # Find the subcommand, skipping git's global options; honour -C <dir>.

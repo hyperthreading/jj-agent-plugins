@@ -14,13 +14,14 @@ json_get session_id SESSION_ID
 # Next to this script, so it is found both as a Claude plugin and when installed by APM.
 shim="$(cd "${BASH_SOURCE%/*}" && pwd -P)/shim"
 [ -x "$shim/git" ] || chmod +x "$shim/git" 2>/dev/null
-if [ -n "$CLAUDE_ENV_FILE" ] && [ -x "$shim/git" ]; then
+if [ "$JJ_AGENT_GUARD" = 1 ] && [ -n "$CLAUDE_ENV_FILE" ] && [ -x "$shim/git" ]; then
   q=$(printf '%q' "$shim")
   printf 'case ":$PATH:" in *:%s:*) ;; *) export PATH=%s:"$PATH" ;; esac\n' "$q" "$q" >> "$CLAUDE_ENV_FILE"
 fi
 
 state_file
 if [ -f "$SF" ]; then : > "$SF"; fi
+rm -f "$SF.state"
 find "${SF%/*}" -type f -mtime +14 -exec rm -f {} + 2>/dev/null
 # Baselines left behind by Bash calls whose PostToolUse never ran (interrupted, denied).
 baseline_path x
@@ -31,6 +32,13 @@ find "${PF%/*}" -type f -mtime +1 -exec rm -f {} + 2>/dev/null
 
 json_get cwd cwd
 scan_dirs "${cwd:-${CLAUDE_PROJECT_DIR:-$PWD}}"
-for r in "${JJ_ROOTS[@]}"; do adopt_new_worktrees "$r"; done
+for r in "${JJ_ROOTS[@]}"; do
+  adopt_new_worktrees "$r"
+  if [ "$JJ_AGENT_STATE" = 1 ]; then
+    step_args 'state at context reset'
+    snapshot "$r"
+    append_state "$r"
+  fi
+done
 [ -n "$NEW_CONTEXT" ] && emit_context SessionStart "$NEW_CONTEXT"
 exit 0

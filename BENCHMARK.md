@@ -1,5 +1,23 @@
 # jj-agent hook latency benchmark
 
+## 공통 지침 기본형 (2026-11-05)
+
+`python3 tests/guidance-bench.py`로 `/bin/bash` hook 전체를 측정했다. jj 0.46.0, macOS 27.0.1 arm64, 임시 APFS 저장소, 별도 jj 설정이다. 각 경로는 warm-up 1회 뒤 15회 실행했으며 이 측정과 동시에 다른 검사 suite를 돌리지 않았다. Python의 `perf_counter` 구간에는 hook 프로세스 시작, L1 snapshot 준비와 읽기, 중복 비교, JSON 출력이 포함된다. 별도 `state_reader`는 snapshot 뒤의 읽기만 잰다.
+
+단위는 ms, `p50 / p95`다. n=15의 nearest-rank p95는 최댓값이다.
+
+| 파일 수 | SessionStart 전체 | 변화 없는 prompt 전체 | 파일 하나 수정 후 prompt 전체 | read-only 상태 읽기 |
+|---|---|---|---|---|
+| 10 | 78.23 / 86.97 | 54.70 / 56.51 | 90.06 / 95.46 | 39.15 / 39.83 |
+| 5,000 | 85.38 / 89.58 | 61.47 / 68.90 | 97.36 / 99.75 | 39.35 / 40.55 |
+| 30,000 | 112.09 / 116.20 | 88.11 / 94.95 | 132.17 / 137.92 | 40.09 / 40.96 |
+
+30,000 파일에서 reset과 편집된 prompt는 이전 100ms 목표를 넘었다. 상태 읽기 자체는 약 40ms로 거의 일정하고, 파일 수에 따른 증가는 snapshot 준비 경로에 있다. 현 단계에서는 외부 사용자 편집을 반영하는 snapshot을 유지한다. 이 비용은 매 tool 호출이 아니라 prompt/reset에 들며, tool snapshot은 기본으로 꺼져 있다. 대규모 저장소의 체감 지연은 실제 client 검증에서 확인한다. 이 표는 이전 버전과 같은 기기·부하에서 번갈아 측정한 속도 비교가 아니다.
+
+초기 실행은 hook 회귀 suite와 겹쳤으므로 채택하지 않았다. 그 실행의 edited-prompt p50은 10/5,000/30,000 파일에서 106.45/105.52/133.62ms였다. 최종 표는 별도 실행 결과다. 재현 script는 min, p50, p95, max와 실행 환경을 JSON으로 출력한다.
+
+## 이전 safeguard 측정
+
 agent의 tool call 하나에 jj-agent hook이 더하는 시간을 기록한다. 측정 대상 코드는 jj-agent 0.3.1(commit `fe333b576bd3`)이고, 측정일은 2026-10-10이다.
 
 ## 측정 환경

@@ -3,6 +3,9 @@
 # no command substitution. Functions return values in variables named by the caller or in
 # globals (JJ_ROOT, SF, BF, GI, CTX, REPORT, CMD, PF) instead of printing them.
 
+. "${BASH_SOURCE%/*}/options.sh"
+. "${BASH_SOURCE%/*}/state.sh"
+
 # HOOK_INPUT <- the hook's stdin JSON.
 read_input() { IFS= read -r -d '' HOOK_INPUT || :; }
 
@@ -32,6 +35,7 @@ STEP_ARGS=() WT_ADOPTED=
 # Convert git worktree $1 of colocated jj repo $2 into a colocated jj workspace in-place,
 # keeping $1's directory inode (so a shell whose cwd is $1 stays valid) and any untracked/dirty files.
 adopt_git_worktree() {
+  [ "$JJ_AGENT_ADOPT_WORKTREES" = 1 ] || return 1
   local wt=$1 main=$2 name wlist head branch='' dirty='' stage note
   [ -d "$wt" ] && [ ! -d "$wt/.jj" ] && [ -f "$wt/.git" ] && [ -d "$main/.jj" ] || return 1
   command -v jj >/dev/null 2>&1 && command -v git >/dev/null 2>&1 || return 1
@@ -130,16 +134,20 @@ mark_announced() {
 
 # CTX <- the notice for jj root $1.
 context_for() {
-  local root=$1 mode=jj ver wt_note=
+  local root=$1 mode=jj ver wt_note= preamble=
+  CTX=
+  [ "$JJ_AGENT_PREAMBLE" = 1 ] || return 0
   [ -e "$root/.git" ] && mode=jj-colocated
   [ -f "$root/.jj/jj-agent-wt" ] && { IFS= read -r wt_note < "$root/.jj/jj-agent-wt"; }
   ver=$(jj --version 2>/dev/null); ver=${ver#jj }; ver=${ver%%-*}; ver=${ver%% *}
-  printf -v CTX 'vcs=%s at %s (jj %s).%s This directory is a Jujutsu repository: use the jj skill for every version-control action in it. Do not run git commands that change state there: they are blocked where possible, and any git change is reported with a recovery point. Read-only git still works, but prefer jj.' \
-    "$mode" "$root" "${ver:-not found on PATH}" "${wt_note:+ $wt_note}"
+  IFS= read -r -d '' preamble < "${BASH_SOURCE%/*}/shared/preamble.md" || :
+  printf -v CTX 'vcs=%s at %s (jj %s).%s\n%s' \
+    "$mode" "$root" "${ver:-not found on PATH}" "${wt_note:+ $wt_note}" "${preamble%$'\n'}"
 }
 
 # Scan git worktrees of repo $1 for any without .jj and convert them into colocated jj workspaces.
 adopt_new_worktrees() {
+  [ "$JJ_AGENT_ADOPT_WORKTREES" = 1 ] || return 0
   local root=$1 main=$1 l gd gf wt
   if [ -f "$root/.git" ]; then
     IFS= read -r l < "$root/.git" 2>/dev/null || return 0
@@ -174,7 +182,7 @@ adopt_new_worktrees() {
 # Sets JJ_ROOTS (array, unique) and NEW_CONTEXT.
 scan_dirs() {
   local d r seen
-  NEW_CONTEXT='' JJ_ROOTS=()
+  NEW_CONTEXT='' JJ_ROOTS=() JJ_NEW_ROOTS=()
   state_file
   for d in "$@"; do
     find_jj_root "$d" || continue
@@ -182,6 +190,7 @@ scan_dirs() {
     for seen in "${JJ_ROOTS[@]}"; do [ "$seen" = "$r" ] && continue 2; done
     JJ_ROOTS[${#JJ_ROOTS[@]}]=$r
     if ! announced "$r"; then
+      JJ_NEW_ROOTS[${#JJ_NEW_ROOTS[@]}]=$r
       mark_announced "$r"
       context_for "$r"
       NEW_CONTEXT="${NEW_CONTEXT:+$NEW_CONTEXT }$CTX"
@@ -340,9 +349,14 @@ step_args() {
   STEP_ARGS=(--config "jj-agent.step=$_step")
 }
 
-# Snapshot repo $1, naming the step if STEP_ARGS is set. Snapshots without it if jj refuses it.
+# Preserve the error for L1; reading the old recorded state after a failed snapshot hides stale workspaces.
 snapshot() {
-  jj -R "$1" util snapshot "${STEP_ARGS[@]}" >/dev/null 2>&1 || jj -R "$1" util snapshot >/dev/null 2>&1
+  SNAPSHOT_ERROR=
+  SNAPSHOT_ERROR=$(jj -R "$1" util snapshot "${STEP_ARGS[@]}" 2>&1) && { SNAPSHOT_ERROR=; return 0; }
+  case $SNAPSHOT_ERROR in
+    *config*) SNAPSHOT_ERROR=$(jj -R "$1" util snapshot 2>&1) && { SNAPSHOT_ERROR=; return 0; } ;;
+  esac
+  return 1
 }
 
 # --- Muse Code: holding a notice until it reaches a tool result (ADR 0002) ---

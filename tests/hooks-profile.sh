@@ -6,6 +6,7 @@
 #   PROFILE_SIZES="10 30000"   number of files in each generated repo
 # needs: bash, jj, git, perl
 set -u
+export JJ_AGENT_SNAPSHOTS=1 JJ_AGENT_DETECT=1 JJ_AGENT_ADOPT_WORKTREES=1
 
 here=$(cd "$(dirname "$0")" && pwd -P)
 P=$(cd "${1:-$here/../plugins/jj-agent/scripts}" && pwd -P) || exit 2

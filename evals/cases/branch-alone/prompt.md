@@ -1,0 +1,1 @@
+Check whether the left branch passes `bash test.sh` on its own, without the right branch merged in. Report the actual result; do not fix a failing test. Preserve this working area's contents and all existing changes. You may create a separate workspace for the check. Do not push.

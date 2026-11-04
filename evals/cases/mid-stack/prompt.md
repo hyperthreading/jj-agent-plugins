@@ -1,0 +1,1 @@
+Create feature.txt containing exactly `feature ready` followed by a newline. Finish this unrelated task in its own described version-control change. Keep my existing changes, their descriptions and their relationships intact. Do not push.

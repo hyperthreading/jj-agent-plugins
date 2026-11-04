@@ -25,7 +25,7 @@ json_get session_id SESSION_ID
 json_get tool_use_id id
 baseline_path "$id"
 broot= bop=
-if [ -f "$BF" ]; then
+if [ "$JJ_AGENT_DETECT" = 1 ] && [ -f "$BF" ]; then
   { IFS= read -r broot; IFS= read -r bop; } < "$BF"
   # If the git index changed, copy it before any jj command below can rewrite it.
   if [ -f "$BF.index" ] && git_index_path "$broot" && ! cmp -s "$BF.index" "$GI" 2>/dev/null; then
@@ -69,9 +69,15 @@ if command -v jj >/dev/null 2>&1; then
       git_report "$broot" "$bop" "$BF.index" "$BF.post"   # snapshots as part of it
     else
       adopt_new_worktrees "$r"
-      snapshot "$r"
+      [ "$JJ_AGENT_SNAPSHOTS" != 1 ] || snapshot "$r"
     fi
   done
+  if [ "$JJ_AGENT_STATE" = 1 ]; then
+    for r in "${JJ_NEW_ROOTS[@]}"; do
+      snapshot "$r"
+      append_state "$r"
+    done
+  fi
 fi
 
 [ -n "$broot" ] && rm -f "$BF" "$BF.index" "$BF.post"

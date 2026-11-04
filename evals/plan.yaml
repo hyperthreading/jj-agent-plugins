@@ -1,0 +1,15 @@
+{
+  "approved": false,
+  "client": "opencode",
+  "model": null,
+  "cases": ["basic", "dirty-wc", "mid-stack", "megamerge-route", "branch-alone", "multi-turn-external"],
+  "arms": ["nudge", "skills", "static", "l0-l2", "default"],
+  "repeats": 1,
+  "seed": 20261105,
+  "total_cost_usd": null,
+  "total_seconds": null,
+  "run_seconds": null,
+  "run_cost_usd": null,
+  "max_steps": null,
+  "stop_on_preservation_failure": true
+}

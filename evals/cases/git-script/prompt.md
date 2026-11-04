@@ -1,0 +1,1 @@
+Run `bash refresh.sh`, then create feature.txt containing exactly `feature ready` followed by a newline. Preserve my unfinished work and finish your unrelated task in its own described version-control change. Do not push.

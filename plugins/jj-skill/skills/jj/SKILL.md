@@ -31,20 +31,17 @@ jj config set --repo ui.conflict-marker-style git    # conflict markers you alre
 
 ## Task loop (default workflow)
 
-```bash
-jj st                       # 1. Start: look at @, then name it after the task
-jj describe -m "<task>"     #    @ is (empty): describe it
-jj new -m "<task>"          #    @ has changes (an earlier task's, or not yours): start on top
-# ... edit files ...        # 2. Work: edits go into @ automatically
-jj commit -m "feat: ..."    # 3. Done: final message for @, and a fresh empty @ on top
-```
+<!-- task-flow:start -->
+Default flow, one change per task: use `jj new -m "<task>"` if @ has children or contains other work; otherwise name an empty @ with `jj describe -m "<task>"`; finish with `jj commit -m "<message>"`.
 
-- Describe before working, so every snapshot of the work is recorded under the task: `jj evolog` lists them.
-- Choose by whether `@` is empty, not by whether it has a description. An empty `@` left by a task that edited nothing gets re-described; `jj new` on top of an empty `@` leaves an empty commit behind.
-- The finished change is `@-`. An empty, undescribed `@` on top of it is normal.
-- Several tasks in a row, or several logical steps in one task: repeat 1–3 for each.
-- A small fix to the task just finished is not a new task: make it in the empty `@`, then `jj squash -u`.
-- Parallel tasks share one working copy and mix their edits in `@`. Give each its own `jj workspace add <path>`. In a workspace converted from a `git worktree` (announced with `bookmark '<name>' at @-`), advance that bookmark after committing (`jj bookmark set <name> -r @-`) so tools inspecting the worktree branch see your finished change.
+1. Read `jj st` and `jj log` before editing. If `@-` is a merge, load `jj-workflow` before choosing this default loop; a mega merge keeps its working copy open across tasks.
+2. Unless the user asked to change that change, do not edit or describe an `@` that has children. Start a new change so the existing change and its descendants keep their content.
+3. Otherwise choose by whether `@` is empty, not whether it already has a description. Preserve another task's edits and description by starting on top. Name your change before editing so its snapshots belong to the task.
+4. After `jj commit`, the finished change is `@-`. The empty, undescribed `@` above it is normal. Repeat the loop for the next task.
+5. A small fix to the task just finished can be made in the empty `@` and folded into your own previous change with `jj squash -u`. Do not fold unrelated user edits into it.
+
+For parallel tasks, several branches, or a branch-only check, load `jj-workflow` to choose the workspace and change layout. In a workspace converted from a git worktree (announced with `bookmark '<name>' at @-`), advance that bookmark after committing with `jj bookmark set <name> -r @-` so tools inspecting the worktree branch see the finished change.
+<!-- task-flow:end -->
 
 ## Intent → command
 

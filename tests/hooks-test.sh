@@ -8,6 +8,9 @@
 # needs: bash, jj, git
 set -u
 
+# This suite exercises the existing opt-in safeguards; guidance defaults have their own suite.
+export JJ_AGENT_SNAPSHOTS=1 JJ_AGENT_GUARD=1 JJ_AGENT_DETECT=1 JJ_AGENT_ADOPT_WORKTREES=1
+
 here=$(cd "$(dirname "$0")" && pwd -P)
 P=$(cd "${1:-$here/../plugins/jj-agent/scripts}" && pwd -P) || exit 2
 export JJ_SHIM_OFF=1   # scenarios run git directly; this only matters when a git shim is on PATH
@@ -36,7 +39,7 @@ hook_input() { # event cwd tool_use_id tool_name command [more tool_input JSON, 
 make_nojq_path() {
   local d=$tmp/nojq-bin t p dir
   mkdir -p "$d"
-  for t in bash sh jj awk sed grep cut tr cksum dirname cat mkdir printf ls wc chmod head find rm ps basename env cp cmp; do
+  for t in bash sh jj awk sed grep cut tr cksum dirname cat mkdir mktemp printf ls wc chmod head find rm ps basename env cp cmp; do
     p=$(type -P "$t") && ln -sf "$p" "$d/$t"
   done
   # real git: the first git on PATH that is not a shim

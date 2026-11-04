@@ -1,0 +1,8 @@
+Where the jj working copy was at the latest user message or context reset. It is not refreshed after every tool call; run `jj st` or `jj log` for the current state.
+Repository: <ROOT> (jj, colocated with Git).
+Workspace: default
+@ (working copy): <WC> "user draft" (empty), no file changes
+@- (parent): <PARENT> "base" [main] (immutable)
+Nearest bookmark: main (1 change below @)
+trunk(): main; @ is 1 ahead, 0 behind
+Warning: @ has 2 children (<CHILD1>, <CHILD2>). Editing files rewrites @ and rebases them. Unless the user asked to change this change, run `jj new` first.

@@ -11,6 +11,7 @@
 # Muse Code only: if post-tool.sh held a git-change notice for this session, deny this one call and
 # hand the notice over as its result (docs/adr/0002-muse-code-support.md).
 . "${BASH_SOURCE%/*}/lib.sh"
+[ "$JJ_AGENT_DETECT" = 1 ] || exit 0
 read_input
 
 json_get tool_name tool

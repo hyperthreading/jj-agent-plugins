@@ -11,9 +11,9 @@ marketplace:
   packages:
     - name: jj-agent
       source: ./plugins/jj-agent
-      description: "Make coding agents use Jujutsu (jj) instead of git: workflow skill, git guard, and per-step snapshots"
+      description: "Jujutsu preamble, state and command/workflow skills, with opt-in safeguards"
       version: 0.4.0
     - name: jj-skill
       source: ./plugins/jj-skill
-      description: "The jj workflow skill alone, without hooks: for agents that follow the skill without a git guard"
+      description: "Complete jj command and workflow skills, without hooks"
       version: 0.4.0

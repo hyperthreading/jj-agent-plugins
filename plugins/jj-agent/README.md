@@ -2,20 +2,23 @@
 
 Make coding agents use [Jujutsu](https://jj-vcs.github.io/jj/) instead of git, **only in jj repos**. Works with Claude Code (and its subagents), Codex and Muse Code.
 
-The plugin is opt-in per repository: a directory with `.jj/` (from `jj git init` or `jj git clone`) opts in. Everywhere else it does nothing. A repo converted in the middle of a session is picked up without a restart, and a `git worktree` of a jj repo (created by an agent harness or `git worktree add`) is automatically converted in-place into a colocated jj workspace (`jj workspace add --colocate`).
+The plugin activates in a directory with `.jj/` (from `jj git init` or `jj git clone`). A repo converted in the middle of a session is picked up without a restart. Git-worktree conversion requires a separate option.
 
 | Part | What it does |
 |---|---|
 | `skills/jj` | How to use jj without thinking much: a fixed task loop, an intent→command table, conflict and push recipes, and a `--help` fallback with a legacy→current command map. Verified against jj 0.46. |
-| `scripts/shim/git` | Claude Code only. A `git` wrapper first on the Bash tool's `PATH`. Outside jj repos it hands everything straight to git. Inside a jj repo it lets through calls made by jj itself and read-only git (`rev-parse`, `ls-files`, ...). It blocks anything that changes state and prints the jj equivalent. It checks for `.jj` on every call, so it starts guarding as soon as a repo is converted. |
-| `SessionStart` | Claude Code: puts the shim on `PATH` via `CLAUDE_ENV_FILE`. Both: if the session starts in a jj repo (or a git worktree of one), tells the agent so. |
-| `PreToolUse` (Bash, Edit, Write) | Bash in jj repos only: records the latest operation and a copy of the git index (copy-on-write where possible). It does not snapshot: the previous tool call and the turn start already did. Never rewrites the command. In Muse Code it also holds one call after a git-change report (see below); elsewhere the file tools pass straight through. |
-| `PostToolUse`, `PostToolUseFailure` (Bash) | In jj repos only: snapshots after each edit or command (Claude Code reports a command that exits non-zero as a failure, so both are hooked), so each step lands in `jj op log`, named by the step (see below). After a Bash command it converts any newly added git worktree into a colocated jj workspace and reports git changes with the operation to restore (see below). The first time the agent touches a jj repo in a session (it ran `jj git init`, or `cd`'d into one), it tells the agent once. |
-| `UserPromptSubmit` | In jj repos only: snapshots (named `changes made between turns`), so what you changed between turns (in an editor or your own terminal) is recorded before the agent acts. Also catches a repo converted (or git worktree added) between turns and tells the agent once. |
+| `skills/jj-workflow` | Choose changes, mega merges and separate workspaces. It works without a supplied state context. |
+| `SessionStart` | Sends the preamble and current state, including on resume, clear and compaction. Invalidates state deduplication. With guard enabled, puts the shim on Claude Code's `PATH` via `CLAUDE_ENV_FILE`. |
+| `UserPromptSubmit` | Snapshots before reading current state. Sends changed state only, and the preamble on first entry into a jj repo. |
+| `PreToolUse` (Bash, Edit, Write) | With detection enabled, records the latest operation and Git index before Bash; handles Muse's pending notices. Never rewrites commands. |
+| `PostToolUse`, `PostToolUseFailure` (Bash) | Announces first entry into jj. Optional snapshots record each tool step; optional detection reports Git changes with a recovery point. Optional adoption converts new Git worktrees. |
+| `scripts/shim/git` | Optional Claude Code guard. Blocks mutating Git inside jj; allows jj's own Git subprocesses and read-only Git used by scripts. The guidance tells the agent to use jj even for direct read-only checks. |
 
 Outside jj repos, each hook exits after a directory walk looking for `.jj`. No jj process runs and nothing is added to the agent's context.
 
 ## Each snapshot names its step
+
+Per-tool snapshots require `JJ_AGENT_SNAPSHOTS=1`. Prompt/reset snapshots prepare L1 and work independently of that option.
 
 The skill has the agent describe `@` with the task before it starts working, so every snapshot of the work belongs to a described change. The hooks name each snapshot after the step that caused it: jj records a command's arguments with the operation it makes, and the hooks add `--config 'jj-agent.step=<step>'` to the snapshotting command. `jj op log` shows it on the `args:` line:
 
@@ -41,6 +44,8 @@ For one change's steps, `jj evolog -r <id> --no-graph -T 'operation.description(
 No extra jj process runs. Asking Codex to prefix commands with a reason was tried and dropped: it changes how Codex applies its approval rules ([ADR 0004](../../docs/adr/0004-step-names-in-snapshots.md)).
 
 ## Git changes are reported, not just blocked
+
+This section applies with `JJ_AGENT_DETECT=1`, which also enables per-tool snapshots.
 
 Codex has no way for a hook to change `PATH` for later commands, so the shim cannot be used there. Instead, the post hook compares the repo after each Bash command with the state it started from, and tells the agent when git changed it:
 
@@ -69,7 +74,7 @@ codex plugin marketplace add hyperthreading/jj-agent-plugins
 codex plugin add jj-agent@hyperthreading
 ```
 
-Codex reads the same marketplace and plugin files and loads both the hooks and the `jj` skill. It does not trust plugin hooks automatically: review and trust them with `/hooks`. To update: `codex plugin marketplace upgrade hyperthreading`, then `codex plugin add jj-agent@hyperthreading` again.
+Codex reads the same marketplace and plugin files and loads the hooks and both skills. It does not trust plugin hooks automatically: review and trust them with `/hooks`. To update: `codex plugin marketplace upgrade hyperthreading`, then `codex plugin add jj-agent@hyperthreading` again.
 
 **Muse Code** (user scope):
 
@@ -106,7 +111,7 @@ In Muse Code, add the marketplace again under the name `hyperthreading` and inst
 apm install hyperthreading/jj-agent-plugins/plugins/jj-agent
 ```
 
-It installs for whichever of `claude` and `codex` the project targets: hooks into `.claude/settings.json` and `.codex/hooks.json` with their scripts under `.claude/hooks/` and `.codex/hooks/`, and the skill into `.claude/skills/` and `.agents/skills/`. Commit these files to share the setup with a team, or ignore them. Use either the plugin or APM for a given agent, not both, or the hooks run twice.
+It installs for whichever of `claude` and `codex` the project targets: hooks into `.claude/settings.json` and `.codex/hooks.json` with their scripts under `.claude/hooks/` and `.codex/hooks/`, and the skills into `.claude/skills/` and `.agents/skills/`. Commit these files to share the setup with a team, or ignore them. Use either the plugin or APM for a given agent, not both, or the hooks run twice.
 
 **Try it in Claude Code without installing:**
 
@@ -117,7 +122,7 @@ claude --plugin-dir jj-agent-plugins/plugins/jj-agent
 
 Requirements:
 - `jj` on `PATH`.
-- Nothing else: the hooks parse their input with bash builtins (no jq). They run under `/bin/bash` when it exists, otherwise the `bash` on `PATH`.
+- Bash and standard shell utilities (`mktemp`, `head`, `cat`, `mkdir`, `rm`, `find`; optional safeguards also use Git/awk/cp). No jq or Python is needed by the installed hooks. They run under `/bin/bash` when it exists, otherwise the `bash` on `PATH`.
 
 ## Using it in an existing git repo
 
@@ -132,10 +137,38 @@ jj bookmark track main@origin   # for each remote branch you pull, if jj suggest
 - `.git` stays as it is and `.jj` is added next to it (git ignores it). Branches become bookmarks, the checked-out branch becomes the parent of the working-copy change `@`, and uncommitted changes carry over into `@`.
 - With the plugin installed (Claude Code or Codex), there is nothing to install per repo. The repo is picked up without a restart: at the next prompt or tool call the agent is told it is now jj.
 - With APM instead, run `apm install hyperthreading/jj-agent-plugins/plugins/jj-agent` in the repo (see Install).
-- You keep using git, your IDE and `gh` as before; only the agent's git is guarded. jj keeps git's HEAD detached at `@-`, so `git status` may show a detached HEAD. jj imports whatever you do with git at its next command.
+- You keep using git, your IDE and `gh` as before. When enabled, the guard affects only the agent. jj keeps git's HEAD detached at `@-`, so `git status` may show a detached HEAD. jj imports whatever you do with git at its next command.
 - To go back to plain git, delete `.jj`. Commits you made only through jj and never put on a bookmark do not become git branches, so set a bookmark on any you want to keep first.
 
 Without `.jj` (plain git repos and other directories) every hook exits silently, writes nothing, and the shim passes every git command straight through. The check walks up from the working directory, so a git repo nested inside a jj working copy counts as part of that jj repo.
+
+## Options and migration
+
+Set environment variables before starting the client, or through its supported hook environment settings. Values are `1` (enabled) or `0` (disabled).
+
+| Variable | Default | Effect |
+|---|---|---|
+| `JJ_AGENT_PREAMBLE` | `1` | Short jj rules and skill-selection guidance |
+| `JJ_AGENT_STATE` | `1` | Prompt/reset state, including a preparatory snapshot; forced off for Muse |
+| `JJ_AGENT_SNAPSHOTS` | `0` | Per-tool snapshots, separate from L1 preparation |
+| `JJ_AGENT_GUARD` | `0` | Claude Code Git shim; does not enable snapshots or detection |
+| `JJ_AGENT_DETECT` | `0` | Git-change detection; forces snapshots on for its recovery baseline |
+| `JJ_AGENT_ADOPT_WORKTREES` | `0` | Convert Git worktrees of jj repos into colocated jj workspaces |
+
+Both skills are packaged independently of these hook options. The clients' skill controls determine which packaged or external skills load; avoid duplicate names. OpenCode's distribution has separate `commandSkill` and `workflow` registration options.
+
+Earlier versions enabled safeguards and worktree conversion automatically. To retain those behaviors:
+
+```bash
+export JJ_AGENT_SNAPSHOTS=1 JJ_AGENT_GUARD=1 JJ_AGENT_DETECT=1 JJ_AGENT_ADOPT_WORKTREES=1
+claude  # or codex / muse; only Claude Code supports guard injection
+```
+
+Turning all safeguards off leaves preamble/state delivery working. For state-only delivery use `JJ_AGENT_PREAMBLE=0`; for preamble-only use `JJ_AGENT_STATE=0`.
+
+The state renderer uses four read-only jj queries after snapshot preparation. It sends at most 15 changed paths, workspace and branch context, and conflict/divergence/mid-stack warnings. Failed snapshot preparation produces an error, not old state presented as current. `sessions/<id>.state` includes the workspace path, so moving between workspaces invalidates deduplication. A context reset sends both enabled layers again without waiting for another prompt.
+
+Hook input/output paths are covered by deterministic tests. Actual client delivery after compaction and the three-client behavioral smoke remain to be verified with an agreed model-call budget; see [evaluation preparation](../../evals/README.md).
 
 ## Notes
 
@@ -145,7 +178,7 @@ Without `.jj` (plain git repos and other directories) every hook exits silently,
 - **The shim affects only Claude Code's Bash tool.** Your terminal is untouched.
 - **What the shim cannot see:** git called by absolute path (`/usr/bin/git`), scripts that reset `PATH`, libgit2-based tools, and git MCP servers. The snapshots and the git-change report cover what slips through.
 - **Conflict markers:** the skill's preflight runs `jj config set --repo ui.conflict-marker-style git`. This changes how conflicts look in that repo for humans too.
-- **Latency:** a Bash command in a jj repo costs two jj processes: about 45 ms in a small repo and 90 ms at 30,000 files on macOS. The post-command snapshot grows with the number of files in the working copy. Turning on watchman (`fsmonitor.backend = "watchman"` in jj 0.46) made snapshots slower in our measurement, so it is not recommended here. Naming the step adds only bash string handling. Measure with `tests/hooks-bench.sh` and `tests/hooks-profile.sh`; recorded numbers and environment are in [BENCHMARK.md](../../BENCHMARK.md).
+- **Latency:** the older enabled-detection path costs two jj processes per Bash call. The default now reads state on prompts/resets instead. Measure whole prompt hooks with `tests/guidance-bench.py`; enabled-safeguard measurements use `tests/hooks-bench.sh` and `tests/hooks-profile.sh`. Recorded numbers and environment are in [BENCHMARK.md](../../BENCHMARK.md).
 
 ## Development
 
@@ -155,4 +188,4 @@ Versions are kept in lockstep in `apm.yml`, `.claude-plugin/plugin.json` and the
 apm pack --check-versions
 ```
 
-`skills/jj/SKILL.md` is also shipped on its own in `plugins/jj-skill`. Copy it there after editing it, and check with `tests/skill-sync-test.sh`.
+The skill sources are in `plugins/jj-skill/skills/`; the shared preamble and task loop are in `shared/`. Run `bash scripts/sync-shared.sh` from the repo root, then `bash tests/skill-sync-test.sh`. Packaged hooks read `scripts/shared/preamble.md`, never the source checkout's `shared/` directory.

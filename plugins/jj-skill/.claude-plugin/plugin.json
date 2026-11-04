@@ -2,7 +2,7 @@
   "name": "jj-skill",
   "displayName": "jj skill",
   "version": "0.4.0",
-  "description": "The jj-agent workflow skill on its own, with no hooks: a non-interactive Jujutsu (jj) workflow the agent follows for every version-control action in jj repos. Nothing guards git or snapshots each step; use jj-agent for that.",
+  "description": "Complete jj command and workflow skills without hooks: the default task loop, command recipes, mega merges and workspaces. Use jj-agent for automatic preamble/state delivery and optional safeguards.",
   "author": { "name": "Yejun" },
   "license": "MIT",
   "keywords": ["jj", "jujutsu", "vcs", "git", "skill"]
