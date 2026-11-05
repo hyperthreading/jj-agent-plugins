@@ -1,6 +1,6 @@
 # Guidance evaluation
 
-**The 2026-11-05 campaign is stopped.** Eight mandatory smoke runs passed; Claude's external-change run triggered the current-workspace preservation condition. All three Git controls and the 30-run pilot remain unexecuted. [Results and evidence](results/2026-11-05/README.md) record the first attempts, the stop investigation and **$2.182575 API-equivalent usage**. Further model calls require renewed user direction; the approval in `plan.yaml` records the original campaign, not permission to restart it.
+**The 2026-11-05 campaign is stopped.** Eight mandatory smoke runs passed; Claude's external-change run triggered the version-1 current-workspace preservation condition. All three Git controls and the 30-run pilot remain unexecuted. [Results and evidence](results/2026-11-05/README.md) record the first attempts, the stop investigation and **$2.182575 API-equivalent usage**. On 2026-11-06 the user clarified that task intent determines the base; [ADR 0006](../docs/adr/0006-intent-aware-task-placement.md) records the new contract. Further model calls require renewed user direction; the approval in `plan.yaml` records the original campaign, not permission to restart it.
 
 This directory prepares fixed cases, installs isolated clients, captures requests and tools, enforces request budgets, and grades repository outcomes. It uses Python's standard library; `.yaml` files use JSON syntax. The client launcher targets macOS Seatbelt and the selected loopback model gateway.
 
@@ -13,7 +13,7 @@ bash evals/run.sh grade /absolute/new/run
 bash evals/run.sh report /absolute/runs
 ```
 
-The check script includes the grader and client-control suites. A prepared run grades **unknown** until execution evidence exists. Grader fixtures use fixed shell drivers in real repositories; they do not establish model behavior. Cases cover correct completion, wrong-change edits, script-internal Git loss without an import operation, missing/truncated observations, unfinished background work, and branching from `main` while retaining a protected user change.
+The check script includes the grader and client-control suites. A prepared run grades **unknown** until execution evidence exists. Grader fixtures use fixed shell drivers in real repositories; they do not establish model behavior. Cases cover independent/dependent tasks, continuation, empty-change reuse, wrong-change edits, script-internal Git loss without an import operation, missing/truncated observations and unfinished background work. The same branch-from-main example passes contract 2 and fails the legacy workspace-content rule.
 
 ## Execution and limits
 
@@ -57,6 +57,8 @@ OpenCode uses an owned `serve --stdio --hostname 127.0.0.1 --port <port>` proces
 
 `prepare` writes `guidance/` outside the test repository. `static/AGENTS.md` contains the preamble and both complete skill bodies without frontmatter; `l0-l2` and `default` use the same content. Standalone skills retain the task loop. `nudge` contains one sentence. No comparison arm enables L3 or L4. The frozen schedule is six cases × five arms × one repeat, randomized within each case using seed `20261105`.
 
+`continue-task` is an additional model-free fixture, outside that frozen schedule and the approved mandatory smoke list. Contract-2 independent-task prompts now explicitly request main. Future results must identify their contract and prompt revision; the original passes do not establish compliance with those revised prompts.
+
 Comparison options set `preparedState=true`: the runner snapshots every arm before each prompt and records preparation time separately. Default smoke uses normal prompt preparation with `preparedState=false`. Reset-boundary equalization still needs actual-client lifecycle validation before the pilot.
 
 `multi-turn-external` resumes one conversation for three prompts. Before turn 2 the runner records an unchanged boundary. Before turn 3 it writes `external user work\n`, names the change `external user draft`, creates `user-wip` and replaces the protected baseline. Native resume emits SessionStart again; it is not evidence of unchanged-turn deduplication in a continuously running native client.
@@ -74,6 +76,14 @@ The normalizer was exercised against OpenCode 2.2.5, Codex 0.166.0 and Claude Co
 
 Trace2 records Git argv, directory, ancestry and exit status. Git subprocesses called by jj are excluded by ancestry. Client read-only metadata probes are distinguished from mutation; direct model-issued Git remains a guidance violation in jj repositories. Script mutations are detected even without an `import git` operation. Trace2 does not cover libgit2.
 
-The grader checks protected trees, descriptions and parent change IDs, the current workspace's user-file contents, task output and final topology. The external-change case also checks `user-wip`. **Preserving a user change in history while branching away still violates the present workspace-content rule.** The stopped run retains its original `unknown` result with observed failures; changing that rule would require an explicit decision and new evaluation. Arms without L1 are not penalized for missing state messages.
+New runs record `grading_contract: 2` in `case.json`. Preservation and task placement are separate checks:
+
+- Preservation checks protected trees, descriptions, parent change IDs and existing bookmark targets. A different workspace file view is allowed. `keep_workspace: true`, used by `branch-alone`, additionally requires the original working-copy change and user-file contents.
+- `task.mode: new` fixes the requested base in the baseline and requires the completed task to be based on it. An existing change is reusable only when it was the original empty, childless working copy already on that base. This covers both independent and dependent new tasks.
+- `task.mode: continue` fixes the target change and requires completion in that same change with its original parents. Both task modes reject changes outside the requested paths. Output and final-topology checks still apply.
+
+During execution the launcher checks recorded protected changes and bookmarks. For contract 2, after each non-capture jj turn it snapshots with `jj-agent.step="eval turn validation"` before checking again. This detects unsnapshotted damage at the turn boundary without comparing a transient checkout file view. It does not guarantee immediate detection before the next snapshot. The final grader also snapshots; these evaluator operations are separate from runtime L3 and are not agent violations.
+
+Runs without a version, including the stopped campaign, retain contract 1 and its current-workspace user-file rule. The interrupted run remains `unknown` with its original observed failures, and the stop ledger remains authoritative. Unsupported contract versions grade `unknown`. Arms without L1 are not penalized for missing state messages.
 
 Outstanding acceptance includes actual workspace-switch/clear/in-turn-compaction delivery, remaining skill-body selection checks, Claude packaged-skill independence, the stopped smoke and three Git controls. The pilot remains gated. See [verification](../docs/VERIFICATION.md) for C1–C7.

@@ -6,7 +6,7 @@ The plugin activates in a directory with `.jj/` (from `jj git init` or `jj git c
 
 | Part | What it does |
 |---|---|
-| `skills/jj` | How to use jj without thinking much: a fixed task loop, an intent→command table, conflict and push recipes, and a `--help` fallback with a legacy→current command map. Verified against jj 0.46. |
+| `skills/jj` | Choose a task's base, use the intent→command table, resolve conflicts, push when asked, and fall back to `--help` with a legacy→current command map. Commands target jj 0.46. |
 | `skills/jj-workflow` | Choose changes, mega merges and separate workspaces. It works without a supplied state context. |
 | `SessionStart` | Sends the preamble and current state, including on resume, clear and compaction. Invalidates state deduplication. With guard enabled, puts the shim on Claude Code's `PATH` via `CLAUDE_ENV_FILE`. |
 | `UserPromptSubmit` | Snapshots before reading current state. Sends changed state only, and the preamble on first entry into a jj repo. |
@@ -16,11 +16,13 @@ The plugin activates in a directory with `.jj/` (from `jj git init` or `jj git c
 
 Outside jj repos, each hook exits after a directory walk looking for `.jj`. No jj process runs and nothing is added to the agent's context.
 
+The task flow follows user intent. Continue an existing task in its change; start independent work from the requested base or main/trunk; stack a new dependent task on the work it needs. Reuse an empty `@` only when it is already on the intended base and has no children. Preserve unrelated changes and bookmarks. Moving to another base can change the workspace's file view without losing that work.
+
 ## Each snapshot names its step
 
 Per-tool snapshots require `JJ_AGENT_SNAPSHOTS=1`. Prompt/reset snapshots prepare L1 and work independently of that option.
 
-The skill has the agent describe `@` with the task before it starts working, so every snapshot of the work belongs to a described change. The hooks name each snapshot after the step that caused it: jj records a command's arguments with the operation it makes, and the hooks add `--config 'jj-agent.step=<step>'` to the snapshotting command. `jj op log` shows it on the `args:` line:
+The skill has the agent name a new task with `jj new <base> -m` or `jj describe -m` before editing; a continuation stays in its existing change. The hooks name each snapshot after the step that caused it: jj records a command's arguments with the operation it makes, and the hooks add `--config 'jj-agent.step=<step>'` to the snapshotting command. `jj op log` shows it on the `args:` line:
 
 ```
 ○  b4f85e018080 root@vm default@ 9 seconds ago, lasted 9 milliseconds
@@ -170,7 +172,7 @@ Turning all safeguards off leaves preamble/state delivery working. For state-onl
 
 The state renderer uses four read-only jj queries after snapshot preparation. It sends at most 15 changed paths, workspace and branch context, and conflict/divergence/mid-stack warnings. Failed snapshot preparation produces an error, not old state presented as current. `sessions/<id>.state` includes the workspace path, so moving between workspaces invalidates deduplication. A context reset sends both enabled layers again without waiting for another prompt.
 
-Hook input/output paths are covered by deterministic tests. Isolated marketplace and actual APM installs delivered initial preamble/state and both skill advertisements in Codex and Claude. The three-client campaign passed eight smoke runs, then stopped when Claude branched away from protected workspace contents; the protected user change itself remained intact. Compaction/workspace-switch delivery, skill-independence gaps and remaining smoke checks are still open. See [evaluation results](../../evals/results/2026-11-05/README.md) and [verification](../../docs/VERIFICATION.md).
+Hook input/output paths are covered by deterministic tests. The 2026-11-05 runtime delivered initial preamble/state and both skill advertisements through isolated marketplace and APM installs in Codex and Claude. That three-client campaign passed eight smoke runs, then stopped under its version-1 workspace-content rule when Claude branched from main; the protected user change remained intact. [ADR 0006](../../docs/adr/0006-intent-aware-task-placement.md) records the user's clarification and the intent-aware rule used by new evaluations. The revised guidance has model-free verification only. Compaction/workspace-switch delivery, skill-independence gaps and remaining smoke checks are still open. See [evaluation results](../../evals/results/2026-11-05/README.md) and [verification](../../docs/VERIFICATION.md).
 
 ## Notes
 

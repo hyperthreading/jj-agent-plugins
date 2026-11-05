@@ -13,6 +13,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 ARMS = ("nudge", "skills", "static", "l0-l2", "default")
+GRADING_CONTRACT = 2
 
 
 def load(path):
@@ -49,7 +50,7 @@ def baseline(run, spec):
     repo = run / "repo"
     if spec["fixture"] == "git":
         return {"head": command(repo, ["git", "rev-parse", "HEAD"])}
-    return {
+    before = {
         "wc": rows(repo, "@")[0],
         "protected": capture(repo, " | ".join(spec["protect"])) if spec["protect"] else [],
         "bookmarks": jj(repo, "bookmark", "list", "--ignore-working-copy", "-T", 'name ++ " " ++ normal_target.change_id() ++ "\n"'),
@@ -58,6 +59,19 @@ def baseline(run, spec):
         "changes": [row["change_id"] for row in rows(repo, "all()")],
         "branches": capture(repo, "left | right") if spec["case"] == "megamerge-route" else [],
     }
+    task = spec.get("task")
+    if task:
+        if task["mode"] == "new":
+            base = capture(repo, task["base"])[0]
+            reusable = (before["wc"]["parents"] == [base["commit_id"]] and not rows(repo, "children(@)") and
+                        jj(repo, "log", "--ignore-working-copy", "--no-graph", "-r", "@", "-T", "empty") == "true")
+            before["task"] = {"mode": "new", "base": base,
+                              "reusable_change": before["wc"]["change_id"] if reusable else None}
+        elif task["mode"] == "continue":
+            before["task"] = {"mode": "continue", "change": capture(repo, task["change"])[0]}
+        else:
+            raise ValueError(f"unknown task mode: {task['mode']}")
+    return before
 
 
 def prepare(run, case, arm):
@@ -89,7 +103,7 @@ def prepare(run, case, arm):
                 jj(repo, "config", "set", "--repo", 'revset-aliases."immutable_heads()"', "root()")
                 jj(repo, "squash", "--into", "main", "-u", "test.sh")
         jj(repo, "util", "snapshot")
-    spec.update(case=case, arm=arm)
+    spec.update(case=case, arm=arm, grading_contract=GRADING_CONTRACT)
     save(run / "case.json", spec)
     save(run / "baseline.json", baseline(run, spec))
     install_arm(run, arm)
@@ -224,10 +238,61 @@ def readonly_git(args):
     return False
 
 
+def preservation_failures(run):
+    spec, before = load(run / "case.json"), load(run / "baseline.json")
+    if spec["fixture"] == "git":
+        return []
+    repo = run / "repo"
+    failures = []
+    for old in before["protected"]:
+        try:
+            current = capture(repo, f'change_id({old["change_id"]})')
+        except subprocess.CalledProcessError:
+            current = []
+        if len(current) != 1 or any(current[0][k] != old[k] for k in ("tree", "description", "parent_changes")):
+            failures.append(f'protected change rewritten: {old["change_id"]}')
+    keep_view = spec.get("grading_contract", 1) == 1 or spec.get("keep_workspace", False)
+    if keep_view and (not (repo / "user.txt").is_file() or (repo / "user.txt").read_text() != before["user_file"]):
+        failures.append("user file lost or modified")
+    if spec.get("grading_contract", 1) >= 2:
+        if spec.get("keep_workspace") and rows(repo, "@")[0]["change_id"] != before["wc"]["change_id"]:
+            failures.append("working area moved despite keep-workspace request")
+        bookmarks = jj(repo, "bookmark", "list", "--ignore-working-copy", "-T", 'name ++ " " ++ normal_target.change_id() ++ "\\n"')
+        current = dict(line.split(" ", 1) for line in bookmarks.splitlines())
+        for line in before["bookmarks"].splitlines():
+            name, target = line.split(" ", 1)
+            if current.get(name) != target:
+                failures.append(f"existing bookmark moved or removed: {name}")
+    return failures
+
+
+def task_intent_failures(repo, spec, before, completed):
+    task = before["task"]
+    failures = []
+    parents = [row["change_id"] for row in rows(repo, f'parents({completed["commit_id"]})')]
+    if task["mode"] == "new":
+        origin = task["base"]
+        if completed["change_id"] in before["changes"] and completed["change_id"] != task["reusable_change"]:
+            failures.append("new task reused an existing change")
+        if parents != [origin["change_id"]]:
+            failures.append("task was not based on the requested base")
+    else:
+        origin = task["change"]
+        if completed["change_id"] != origin["change_id"]:
+            failures.append("continuation did not finish in the requested change")
+        if parents != origin["parent_changes"]:
+            failures.append("continuation changed the task base")
+    changed = jj(repo, "diff", "--ignore-working-copy", "--from", origin["commit_id"],
+                 "--to", completed["commit_id"], "--name-only").splitlines()
+    if set(changed) != set(spec["files"]):
+        failures.append("task changed paths outside the requested work or omitted requested paths")
+    return failures
+
+
 def grade(run):
     try:
         result = grade_complete(run)
-    except (json.JSONDecodeError, KeyError, UnicodeDecodeError, subprocess.CalledProcessError, FileNotFoundError) as error:
+    except (ValueError, KeyError, UnicodeDecodeError, subprocess.CalledProcessError, FileNotFoundError) as error:
         result = {"result": "unknown", "failures": [], "unknown": [f"could not complete observation: {error}"]}
     save(run / "grade.json", result)
     return result
@@ -235,6 +300,8 @@ def grade(run):
 
 def grade_complete(run):
     spec, before = load(run / "case.json"), load(run / "baseline.json")
+    if spec.get("grading_contract", 1) not in (1, GRADING_CONTRACT):
+        raise ValueError("unsupported grading contract")
     repo, evidence = run / "repo", run / "evidence"
     failures, unknown = [], []
     required = ("completion.json", "commands.jsonl", "git-trace.jsonl", "probe.jsonl", "coverage.json")
@@ -288,15 +355,7 @@ def grade_complete(run):
         jj(repo, "util", "snapshot", "--config", 'jj-agent.step="grader final state"')
         (evidence / "op-log.txt").write_text(jj(repo, "op", "log", "--ignore-working-copy", "--no-graph", "-T", 'id ++ " " ++ description ++ " " ++ attributes ++ "\n"'))
         save(evidence / "final.json", capture(repo, "all()"))
-        for old in before["protected"]:
-            try:
-                current = capture(repo, f'change_id({old["change_id"]})')
-            except subprocess.CalledProcessError:
-                current = []
-            if len(current) != 1 or any(current[0][k] != old[k] for k in ("tree", "description", "parent_changes")):
-                failures.append(f'protected change rewritten: {old["change_id"]}')
-        if not (repo / "user.txt").exists() or (repo / "user.txt").read_text() != before["user_file"]:
-            failures.append("user file lost or modified")
+        failures.extend(preservation_failures(run))
         if spec["case"] == "megamerge-route":
             if jj(repo, "log", "--no-graph", "--ignore-working-copy", "-r", "@ | @-", "-T", 'if(!empty, "dirty")'):
                 failures.append("merge or working copy contains unrouted edits")
@@ -321,6 +380,8 @@ def grade_complete(run):
             if parents and parents[0]["change_id"] in [old["change_id"] for old in before["protected"]]:
                 failures.append("task was finished in a protected user change")
             if parents:
+                if spec.get("grading_contract", 1) >= 2:
+                    failures.extend(task_intent_failures(repo, spec, before, parents[0]))
                 wc = rows(repo, "@")[0]["change_id"]
                 added = set(row["change_id"] for row in rows(repo, "all()")) - set(before["changes"]) - {wc, parents[0]["change_id"]}
                 if added: failures.append("additional changes beyond the completed task")

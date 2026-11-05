@@ -10,6 +10,7 @@ Use jj for version control in a jj repository. Use `jj st` and `jj log` to check
 ## Choose the layout
 
 - For one task on one line of work, use the default task loop in the `jj` skill.
+- Choose the base by intent: continue the requested task in its change; start independent work from its requested base or main/trunk. A dirty working copy does not by itself make the new task depend on that draft.
 - If `@-` has several parents, inspect the graph and description to see whether this is a working mega merge. Follow the mega merge procedure below when several active branches are being built together.
 - If parallel tasks would edit the same files, or a branch must be tested alone, use separate workspaces.
 - When one branch needs another's code, stack the dependent branch on it rather than leave the two side by side.

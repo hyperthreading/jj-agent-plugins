@@ -2,7 +2,7 @@
 
 The `jj` and `jj-workflow` skills on their own, with no hooks. `jj` has the complete default task loop, command tables, conflict/push recipes and command fallback. `jj-workflow` covers mega merges, parallel work and branch-only testing.
 
-Both files are identical to the skills in jj-agent and target jj 0.46. They tell the agent to read current state itself when no `jj-state` context is available. The task loop protects user edits, descriptions and changes that have children; it does not rely on an external preamble.
+Both files are identical to the skills in jj-agent and target jj 0.46. They tell the agent to read current state itself when no `jj-state` context is available. The task loop continues existing tasks in their change, starts independent tasks from their intended base, and stacks dependent tasks on the work they need. It protects unrelated changes and bookmarks, and only reuses an empty `@` on the intended base with no children. These rules are complete without an external preamble.
 
 ## What you give up compared with jj-agent
 
@@ -13,7 +13,7 @@ Both files are identical to the skills in jj-agent and target jj 0.46. They tell
 | Optional per-tool snapshots | jj snapshots when jj commands run. Edits since the last snapshot are not in the operation log yet. |
 | Optional Git-change report | No hook reports Git changes or names a recovery point. |
 
-The skill mentions a "this is a jj repo" block message, a "jj-agent: during the last command ..." report, and step names on snapshots (`jj-agent.step=...`). Those come from jj-agent's hooks and never appear with this plugin alone. The task name the skill has the agent put on `@` (`jj describe -m` before working) works without them.
+The skill mentions a "this is a jj repo" block message, a "jj-agent: during the last command ..." report, and step names on snapshots (`jj-agent.step=...`). Those come from jj-agent's hooks and never appear with this plugin alone. Naming a new task with `jj new <base> -m` or `jj describe -m` works without them.
 
 Install one of jj-skill and jj-agent, not both: jj-agent already contains both skills.
 

@@ -186,26 +186,8 @@ def sandbox(run, port, server_port=None):
     return ["/usr/bin/sandbox-exec", "-f", str(path)]
 
 
-def preservation(run):
-    spec, before = runner.load(run / "case.json"), runner.load(run / "baseline.json")
-    repo = run / "repo"
-    if spec["fixture"] == "git":
-        return []
-    failures = []
-    if not (repo / "user.txt").is_file() or (repo / "user.txt").read_text() != before["user_file"]:
-        failures.append("user file lost or modified")
-    for old in before["protected"]:
-        try:
-            current = runner.capture(repo, f'change_id({old["change_id"]})')
-        except subprocess.CalledProcessError:
-            current = []
-        if len(current) != 1 or any(current[0][k] != old[k] for k in ("tree", "description", "parent_changes")):
-            failures.append(f'protected change rewritten: {old["change_id"]}')
-    return failures
-
-
 def preservation_stop(run, budget):
-    violations = preservation(run)
+    violations = runner.preservation_failures(run)
     if violations:
         reason = "; ".join(violations)
         budget.stop("preservation violation: " + reason)
@@ -433,6 +415,10 @@ def launch_isolated(run, client, phase, plan, campaign, opencode_source, env, co
                         pass
                 code = proc.wait()
             if not capture_only:
+                # Validate unsnapshotted edits after the client turn has ended.
+                # Polling the file view during a checkout can falsely report loss.
+                if spec["fixture"] != "git" and spec.get("grading_contract", 1) >= 2:
+                    runner.jj(run / "repo", "util", "snapshot", "--config", 'jj-agent.step="eval turn validation"')
                 stop = preservation_stop(run, budget) or stop
                 if stop:
                     budget.stop(stop)

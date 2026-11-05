@@ -10,6 +10,8 @@ coding agent(Claude Code, Codex, Muse Code)가 jj repo에서는 git 대신 jj를
 | [ADR 0002](adr/0002-muse-code-support.md) | Muse Code 지원과 알림 전달 방식, 그 실험 |
 | [ADR 0003](adr/0003-detector-fixes.md) | 감지 보완(gitdir 파일, 긴 op log)과 가져오지 않은 제안 |
 | [ADR 0004](adr/0004-step-names-in-snapshots.md) | snapshot에 task와 step 이름 남기기, Codex 명령 접두어 실험 |
+| [ADR 0005](adr/0005-budgeted-guidance-validation.md) | 예산 제한 client 캠페인의 보존 조건 중단과 미완료 수용 기준 |
+| [ADR 0006](adr/0006-intent-aware-task-placement.md) | 작업 의도에 따른 기반 선택과 버전별 보존 판정 |
 | [BENCHMARK.md](../BENCHMARK.md) | hook 지연, 단계별 비용, 측정 환경 |
 
 ## 원칙
@@ -52,6 +54,8 @@ plugins/jj-agent/
 
 공통 원본은 `shared/`와 `plugins/jj-skill/skills/`다. `scripts/sync-shared.sh`가 기본 task loop, hook preamble과 jj-agent의 두 skill을 생성한다. hook은 설치된 파일만 읽는다. 상태 형식과 공통 fixture는 [shared/jj-state.md](../shared/jj-state.md)에 있다. OpenCode compass가 같은 원본을 복사하고 source revision을 고정한다.
 
+task loop는 [작업 관계](../GLOSSARY.md)에 따라 기반을 고른다. 이어 하기는 기존 change, 독립 작업은 요청한 기반이나 main/trunk, 의존 작업은 필요한 change 위에서 시작한다. 빈 `@`도 기반과 자식 여부를 확인한 뒤 재사용한다. 작업 보존은 보호 change와 bookmark를 기준으로 판단하며, workspace 자체의 유지는 별도 요청 조건이다.
+
 ## agent별 동작
 
 | | Claude Code | Codex | Muse Code |
@@ -82,7 +86,7 @@ APM으로 설치할 수 있는 target은 `claude`, `codex`로 제한한다. 다�
 
 자세한 내용은 ADR 0004에 있다.
 
-- **task:** agent가 일을 시작할 때 `jj describe -m`(`@`가 비었을 때)이나 `jj new -m`으로 `@`에 붙인다. skill의 task loop에 있다.
+- **task:** 기존 작업은 해당 change에서 이어 한다. 새 작업은 의도한 기반에서 `jj new <base> -m`으로 이름을 붙인다. 그 기반 위에 자식 없는 빈 `@`가 있으면 `jj describe -m`으로 재사용한다. skill의 task loop에 있다.
 - **step:** hook이 snapshot하는 jj 명령 끝에 `--config 'jj-agent.step=<step>'`을 붙인다. jj는 명령 인자를 op의 `args`로 남긴다. Bash는 Claude Code Bash 도구의 `description`, 없으면 명령 첫 줄을 쓴다. 파일 도구는 도구 이름과 경로, Codex patch는 patch가 건드린 파일을 쓴다. 첫 줄만, 최대 100바이트이고 문자 경계에서 자른다. jj가 인자를 거부하면 태그 없이 다시 snapshot한다.
 - `jj op log`의 `args:` 줄에 보인다. change 하나의 단계별 기록은 `jj evolog -r <id> -T 'operation.description() ++ "  " ++ operation.attributes() ++ "\n"'`로 본다.
 
@@ -184,7 +188,7 @@ Muse는 hook의 `additionalContext`를 요청 맨 앞의 developer 메시지에 
 - `tests/guidance-test.py`: 원본 checkout 없이 설치 파일만으로 preamble/state, 기본값, 독립 옵션, session/reset/workspace, snapshot 오류를 확인한다.
 - `tests/state-test.py`: compass와 공유하는 실제 jj 상태 fixture의 기대 출력을 검사한다.
 - `tests/skill-sync-test.sh`: 두 skill 배포물, task loop, preamble 생성 결과를 비교한다.
-- `evals/fixtures/grader/test.py`: 정상, 사용자 change 무단 수정, import op 없는 script 내부 Git 유실, 관측 누락을 구별한다. 실제 client 실행과 pilot은 예산 합의 뒤 별도로 검증한다.
+- `evals/fixtures/grader/test.py`: 독립·계속·의존 작업의 배치, 보호 change/bookmark의 무단 수정, import op 없는 script 내부 Git 유실, 관측 누락을 구별한다. 계약 1의 과거 판정도 유지한다. 실제 client 캠페인은 중단 상태이며 후속 실행과 pilot에는 새 승인이 필요하다.
 
 - `tests/hooks-test.sh`: 실제 jj repo에서 hook을 Claude Code·Codex·Muse 형식의 입력으로 부르는 시나리오 테스트다. 전체 PATH와 jq·shim이 없는 최소 PATH에서 각각 돈다. 다음을 확인한다.
   - git 변경 판정

@@ -2,6 +2,8 @@
 
 **Stopped; acceptance incomplete; no comparative conclusion.** Eight mandatory smoke runs passed. Claude's external-change run triggered the existing current-workspace preservation condition. Three Git controls and all 30 pilot runs were not started. The authoritative ledger still contains `preservation violation: user file lost or modified`; further model calls require renewed user direction.
 
+**2026-11-06 clarification:** [ADR 0006](../../../docs/adr/0006-intent-aware-task-placement.md) resolves the preservation question below. The original prompt requested an unrelated task, so `jj new main` was appropriate. New runs use intent-aware contract 2; this campaign retains contract 1, its original grades and its stopped ledger. The original model-free counts below belong to this export, not the revised guidance.
+
 ## Accounting and fixed inputs
 
 - **12 paid attempts, 69 forwarded HTTP requests, $2.182575 API-equivalent usage, $0 pending reservations.** These totals include the three initial attempts with environment/observation problems. Reported input/output totals are 740,804 / 5,543 tokens; cached input is charged without discounts.

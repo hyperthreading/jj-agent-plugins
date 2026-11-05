@@ -1,1 +1,1 @@
-{"fixture":"empty","tags":["L1","lifecycle"],"files":{"feature.txt":"feature ready\n"},"protect":[],"turns":3}
+{"fixture":"empty","tags":["L1","lifecycle"],"files":{"feature.txt":"feature ready\n"},"protect":[],"turns":3,"task":{"mode":"new","base":"main"}}

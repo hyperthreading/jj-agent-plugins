@@ -1,1 +1,1 @@
-Create feature.txt containing exactly `feature ready` followed by a newline. Keep my unfinished work and its description intact, and finish your unrelated task in its own described version-control change. Do not push.
+Create feature.txt containing exactly `feature ready` followed by a newline. Keep my unfinished work and its description intact. Start this unrelated task from main, without including my unfinished edits, and finish it in its own described version-control change. Do not push.
