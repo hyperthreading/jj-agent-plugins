@@ -1,0 +1,1 @@
+{"fixture":"mid-stack","tags":["L1"],"files":{"feature.txt":"feature ready\n"},"protect":["@","children(@)"],"turns":1,"task":{"mode":"new","base":"main"}}

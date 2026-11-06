@@ -11,6 +11,7 @@
 # Muse Code only: if post-tool.sh held a git-change notice for this session, deny this one call and
 # hand the notice over as its result (docs/adr/0002-muse-code-support.md).
 . "${BASH_SOURCE%/*}/lib.sh"
+[ "$JJ_AGENT_DETECT" = 1 ] || exit 0
 read_input
 
 json_get tool_name tool
@@ -47,26 +48,12 @@ fi
 
 [ -n "$shell" ] || exit 0
 json_get cwd cwd
-find_jj_root "${cwd:-$PWD}" || {
-  [ -n "$ADOPTION_CONTEXT" ] && emit_context PreToolUse "$ADOPTION_CONTEXT"
-  exit 0
-}
+find_jj_root "${cwd:-$PWD}" || exit 0
 root=$JJ_ROOT
-json_get tool_use_id id
-baseline_path "$id"
-if [ -n "$ADOPTION_CONTEXT" ]; then
-  if [ -n "$MUSE_PLUGIN_ID" ]; then
-    # Muse needs this beside the tool result, not in PreToolUse additionalContext.
-    [ -d "${BF%/*}" ] || mkdir -p "${BF%/*}" 2>/dev/null
-    printf '%s\n' "$ADOPTION_CONTEXT" > "$BF.notice"
-  else
-    context_for "$root"
-    emit_context PreToolUse "$ADOPTION_CONTEXT $CTX"
-    state_file; mark_announced "$root"
-  fi
-fi
 command -v jj >/dev/null 2>&1 || exit 0
 
+json_get tool_use_id id
+baseline_path "$id"
 op=$(jj -R "$root" op log --ignore-working-copy --no-graph -n 1 -T id 2>/dev/null)
 [ -n "$op" ] || exit 0
 [ -d "${BF%/*}" ] || mkdir -p "${BF%/*}" 2>/dev/null

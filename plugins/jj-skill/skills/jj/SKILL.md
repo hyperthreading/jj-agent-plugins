@@ -31,20 +31,18 @@ jj config set --repo ui.conflict-marker-style git    # conflict markers you alre
 
 ## Task loop (default workflow)
 
-```bash
-jj st                       # 1. Start: look at @, then name it after the task
-jj describe -m "<task>"     #    @ is (empty): describe it
-jj new -m "<task>"          #    @ has changes (an earlier task's, or not yours): start on top
-# ... edit files ...        # 2. Work: edits go into @ automatically
-jj commit -m "feat: ..."    # 3. Done: final message for @, and a fresh empty @ on top
-```
+<!-- task-flow:start -->
+Default flow: continue the requested task in its change; start an independent task with `jj new <base> -m "<task>"` from the intended base (usually main/trunk). Preserve unrelated changes and bookmarks; a different workspace view is not lost work. Do not rewrite a change that has children unless asked. Finish with `jj commit -m "<message>"`.
 
-- Describe before working, so every snapshot of the work is recorded under the task: `jj evolog` lists them.
-- Choose by whether `@` is empty, not by whether it has a description. An empty `@` left by a task that edited nothing gets re-described; `jj new` on top of an empty `@` leaves an empty commit behind.
-- The finished change is `@-`. An empty, undescribed `@` on top of it is normal.
-- Several tasks in a row, or several logical steps in one task: repeat 1–3 for each.
-- A small fix to the task just finished is not a new task: make it in the empty `@`, then `jj squash -u`.
-- Parallel tasks share one working copy and mix their edits in `@`. Give each its own `jj workspace add <path>`. For a colocated workspace, use `jj workspace add --colocate <new-path>` (jj 0.46+). On first touch, jj-agent automatically initializes Git worktrees of jj repos as workspaces sharing the main jj repository and operation history; advance the worktree branch after committing (`jj bookmark set <branch> -r @-`) so Git-based tools see finished work. Automatically attached workspaces retain a temporary recorded root in jj 0.46: address them with `jj -R <actual-path>` and let the Git harness remove them; do not use `jj workspace remove` or `workspace root --name` for them.
+1. Read `jj st` and `jj log` before editing. If `@-` is a merge, load `jj-workflow` before choosing this default loop; a mega merge keeps its working copy open across tasks.
+2. Choose the task's relationship before choosing a change. Continue a requested task in its existing change. For an independent task, inspect the graph and use `jj new <base> -m "<task>"` from the requested base or the repository's main/trunk; do not stack it on an unrelated draft merely because that draft is current. Do not assume a local bookmark named `main` exists. If the relationship is unclear, use the conversation and diff to resolve it; ask before choosing a base that changes which work is included.
+3. A new task that depends on existing work starts on top of that work, using `jj new <change> -m "<task>"` (`jj new -m "<task>"` when that change is `@`). Unless the user asked to change that change, do not edit or describe an `@` that has children. This preserves its descendants while letting dependent work build on it.
+4. Reuse an empty `@` only if it is already on the intended base and has no children; name it with `jj describe -m "<task>"`. An empty `@` above an unfinished draft is still based on that draft. Continue a nonempty `@` when the request belongs to that task; do not split a task just because another message arrived.
+5. Before leaving unrelated work, let `jj st` record it and keep its change, description, parent relationships and bookmarks intact. Changing the current view with `jj new <base>` does not discard that work. If the user asked to keep this workspace in place, create a separate workspace instead.
+6. After `jj commit`, the finished change is `@-`. The empty, undescribed `@` above it is normal. A small follow-up fix can be made there and folded into your own previous change with `jj squash -u`; do not fold unrelated user edits into it.
+
+For parallel tasks, several branches, or a branch-only check, load `jj-workflow` to choose the workspace and change layout. In a workspace converted from a git worktree (announced with `bookmark '<name>' at @-`), advance that bookmark after committing with `jj bookmark set <name> -r @-` so tools inspecting the worktree branch see the finished change.
+<!-- task-flow:end -->
 
 ## Intent → command
 

@@ -18,6 +18,8 @@ jj 0.46에서 확인한 것:
 
 ### 1. task는 agent가 `@`의 description으로 남긴다 (skill)
 
+2026-11-06: 아래의 empty 여부만으로 고르는 task loop는 [ADR 0006](0006-intent-aware-task-placement.md)의 의도별 기반 선택으로 대체했다. task 이름을 description에 남기는 결정은 유지한다.
+
 skill의 task loop를 바꾼다. 일을 시작할 때 `@`에 task 이름을 붙이고, 끝낼 때 `jj commit -m`으로 최종 메시지를 쓴다.
 
 ```bash

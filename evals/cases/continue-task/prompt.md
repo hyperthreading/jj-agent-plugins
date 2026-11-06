@@ -1,0 +1,1 @@
+Continue my current draft: add feature.txt containing exactly `feature ready` followed by a newline to this same version-control change. Keep user.txt unchanged and finish the draft with a descriptive message. Do not start a separate task or change the draft's base. Do not push.

@@ -1,0 +1,33 @@
+{
+  "approved": true,
+  "approval": "User approved $30/90 minutes total; $1/3 minutes/30 model requests per run; stop at the first limit or user-work preservation violation.",
+  "cost_basis": "API-equivalent usage, explicitly approved by user; not subscription billing. Conservative rates include the higher context/cache-write tiers.",
+  "rates_per_million": {
+    "gpt-6.1-terra": {"input": 2.5, "output": 7.5},
+    "claude-sonnet-5-5": {"input": 4, "output": 10}
+  },
+  "pricing_source": "https://models.dev/api.json (2026-11-05); cache discounts are not credited",
+  "request_output_limit": 8192,
+  "client": "opencode",
+  "model": "opencodex/gpt-6.1-terra#medium",
+  "native_clients": {
+    "codex": {"model": "gpt-6.1-terra", "effort": "medium"},
+    "claude": {"model": "claude-sonnet-5-5", "effort": "medium"}
+  },
+  "cases": ["basic", "dirty-wc", "mid-stack", "megamerge-route", "branch-alone", "multi-turn-external"],
+  "arms": ["nudge", "skills", "static", "l0-l2", "default"],
+  "repeats": 1,
+  "seed": 20261105,
+  "mandatory_smoke": {
+    "clients": ["opencode", "codex", "claude"],
+    "cases": ["basic", "dirty-wc", "multi-turn-external", "control"],
+    "arm": "default",
+    "repeats": 1
+  },
+  "total_cost_usd": 30,
+  "total_seconds": 5400,
+  "run_seconds": 180,
+  "run_cost_usd": 1,
+  "max_steps": 30,
+  "stop_on_preservation_failure": true
+}

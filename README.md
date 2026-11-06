@@ -2,10 +2,9 @@
 
 Make coding agents (Claude Code, Codex and Muse Code) use [Jujutsu](https://jj-vcs.github.io/jj/) instead of git, **only in jj repos**. Everywhere else the plugin does nothing.
 
-- **Skill:** a non-interactive jj workflow the agent follows for every version-control action.
-- **Git guard:** in Claude Code, a `git` shim on the agent's `PATH` blocks git commands that change state and names the jj equivalent.
-- **Snapshots and git-change reports:** each edit and command lands in `jj op log`, named by the step that made it, under a change the agent describes with its task. When git changes the repo anyway (from a script, or in Codex and Muse Code where the shim cannot be used), the agent is told what happened and which operation to restore.
-- **Git worktrees of jj repos:** on first touch, attach the checkout to the main jj repository without moving working files. Git commits and jj operation history stay shared. This optional path needs Python 3 on macOS/Linux. See [worktree initialization](plugins/jj-agent/README.md#automatic-worktree-initialization).
+- The default installation supplies a short preamble, current `jj-state` at prompts/context resets, and two skills: `jj` for commands and `jj-workflow` for branches, mega merges and workspaces. Muse receives the preamble and skills; its state delivery remains disabled.
+- Per-tool snapshots, the Claude Code git guard, Git-change detection and Git-worktree adoption are opt-in. See [options and migration](plugins/jj-agent/README.md#options-and-migration).
+- OpenCode's `jj-compass` copies the same guidance from this repository. Each distribution includes its own files and works without this checkout.
 
 ## Install
 
@@ -41,7 +40,7 @@ Restart the agent session after installing. In Codex, trust the hooks with `/hoo
 
 Installed from the old `yejun-jj` marketplace? See [moving to `hyperthreading`](plugins/jj-agent/README.md#install).
 
-**Skill only:** if the agent follows the skill well enough without a git guard or snapshots, install `jj-skill` instead of `jj-agent` (same commands with `jj-skill@hyperthreading`, or `apm install hyperthreading/jj-agent-plugins/plugins/jj-skill`). It has no hooks, so there is nothing to trust or approve. See [plugins/jj-skill/README.md](plugins/jj-skill/README.md) for what it leaves out. Install one of the two, not both.
+**Skills only:** install `jj-skill` instead of `jj-agent` for the two complete skills without prompt hooks (same commands with `jj-skill@hyperthreading`, or `apm install hyperthreading/jj-agent-plugins/plugins/jj-skill`). The default task workflow remains in the `jj` skill. See [plugins/jj-skill/README.md](plugins/jj-skill/README.md). Install one of the two, not both.
 
 To use it in a repo, make the repo a jj repo. For an existing git repo:
 
@@ -58,9 +57,17 @@ jj git init
 - [docs/adr/0002-muse-code-support.md](docs/adr/0002-muse-code-support.md): Muse Code support
 - [docs/adr/0003-detector-fixes.md](docs/adr/0003-detector-fixes.md): git-change detection fixes (gitdir files, long operation logs)
 - [docs/adr/0004-step-names-in-snapshots.md](docs/adr/0004-step-names-in-snapshots.md): task and step names in snapshots, and the Codex approval experiment
-- [docs/adr/0005-safe-worktree-adoption.md](docs/adr/0005-safe-worktree-adoption.md): automatic worktree initialization, scope, concurrency and failure handling
 - [BENCHMARK.md](BENCHMARK.md): hook latency and test environment
-- `tests/`: `hooks-test.sh` (scenarios), `worktree-boundary-test.sh` (scope and file preservation), `adoption-failure-test.py` (concurrency and interruption), `gc-safety-test.py` (shared GC, cleanup and refusal caching), `hooks-bench.sh` and `hooks-profile.sh` (latency), `skill-sync-test.sh` (the two skill copies match)
+- [shared/jj-state.md](shared/jj-state.md): shared state format and fixtures
+- [evals/README.md](evals/README.md): model-free case preparation, grading and the budgeted validation handoff
+- [docs/VERIFICATION.md](docs/VERIFICATION.md): measured candidate results and remaining client checks
+- `tests/`: `guidance-test.py` (defaults, packaged hooks and lifecycle), `state-test.py` (shared fixtures), `hooks-test.sh` (opt-in regressions), `guidance-bench.py` (whole prompt hooks), `skill-sync-test.sh` (generated distributions)
+
+## Shared source
+
+Edit `shared/preamble.md`, `shared/task-flow.md` and `plugins/jj-skill/skills/`, then run `bash scripts/sync-shared.sh`. The task loop between generation markers in `jj/SKILL.md` comes from `shared/task-flow.md`. `bash tests/skill-sync-test.sh` rejects drift in either plugin or the hook's packaged preamble. OpenCode's `jj-compass/scripts/sync-shared.sh <this-checkout>` copies these files, the state specification and fixtures, and records the source revision.
+
+For a skill-only client that also needs an always-present rule, copy the generated `plugins/jj-agent/scripts/shared/preamble.md` into its project instructions. Claude Code, Codex and OpenCode default installations deliver it automatically; they do not need this manual step.
 
 ## License
 

@@ -16,40 +16,16 @@ read_input
 
 json_get file_path file; [ -n "$file" ] || json_get notebook_path file
 json_get cwd cwd; cwd=${cwd:-$PWD}
-json_get tool_name tool
-if [ -z "$file" ] && [ -n "$MUSE_PLUGIN_ID" ]; then
-  # Muse's native edit_file/write tools use `path` instead of `file_path`.
-  case $tool in *[Ee]dit*|*[Ww]rite*) json_get path file ;; esac
-fi
-fdir=
-if [ -n "$file" ]; then
-  case $file in /*) ;; *) file=$cwd/$file ;; esac
-  fdir=${file%/*}
-  # Normalize the containing directory, retaining the edited filename itself.
-  # This also keeps step labels relative when cwd has .. or a symlink alias.
-  fdir=$(cd "$fdir" 2>/dev/null && pwd -P) || fdir=${file%/*}
-  file=$fdir/${file##*/}
-fi
+fdir=; [ -n "$file" ] && fdir=${file%/*}
 
 # Cheap exit when no candidate is inside a jj repo. pre-tool.sh only records a baseline inside one.
-find_jj_root "$fdir" || find_jj_root "$cwd" || {
-  if [ -n "$ADOPTION_CONTEXT" ]; then
-    json_get hook_event_name event
-    emit_context "${event:-PostToolUse}" "$ADOPTION_CONTEXT"
-  fi
-  exit 0
-}
+find_jj_root "$fdir" || find_jj_root "$cwd" || exit 0
 
 json_get session_id SESSION_ID
 json_get tool_use_id id
 baseline_path "$id"
-if [ -f "$BF.notice" ]; then
-  IFS= read -r note < "$BF.notice"
-  ADOPTION_CONTEXT="$ADOPTION_CONTEXT${ADOPTION_CONTEXT:+ }$note"
-  rm -f "$BF.notice"
-fi
 broot= bop=
-if [ -f "$BF" ]; then
+if [ "$JJ_AGENT_DETECT" = 1 ] && [ -f "$BF" ]; then
   { IFS= read -r broot; IFS= read -r bop; } < "$BF"
   # If the git index changed, copy it before any jj command below can rewrite it.
   if [ -f "$BF.index" ] && git_index_path "$broot" && ! cmp -s "$BF.index" "$GI" 2>/dev/null; then
@@ -64,6 +40,7 @@ REPORT=
 if command -v jj >/dev/null 2>&1; then
   # Name the step in its snapshot: a shell command by the tool's description (Claude Code's Bash
   # tool has one) or its first line, a file tool by the file, a Codex patch by the files it touches.
+  json_get tool_name tool
   step=$CMD_FULL
   if [[ $step = '*** Begin Patch'* ]]; then
     rest=$step step=
@@ -91,9 +68,16 @@ if command -v jj >/dev/null 2>&1; then
     if [ "$r" = "$broot" ] && [ -n "$bop" ]; then
       git_report "$broot" "$bop" "$BF.index" "$BF.post"   # snapshots as part of it
     else
-      snapshot "$r"
+      adopt_new_worktrees "$r"
+      [ "$JJ_AGENT_SNAPSHOTS" != 1 ] || snapshot "$r"
     fi
   done
+  if [ "$JJ_AGENT_STATE" = 1 ]; then
+    for r in "${JJ_NEW_ROOTS[@]}"; do
+      snapshot "$r"
+      append_state "$r"
+    done
+  fi
 fi
 
 [ -n "$broot" ] && rm -f "$BF" "$BF.index" "$BF.post"
@@ -117,8 +101,10 @@ if [ -n "$MUSE_PLUGIN_ID" ]; then
   fi
   # A failed call's result cannot be replaced, and an oversized one must not be: Muse kills a hook
   # whose output passes 16 KiB. The next state-changing call carries the notice.
-  save_pending undelivered "${msg/ that you just ran in / that you ran earlier in }"
-  exit 0
+  if [ -n "$REPORT" ]; then
+    save_pending undelivered "${msg/ that you just ran in / that you ran earlier in }"
+    exit 0
+  fi
 fi
 emit_context "${event:-PostToolUse}" "$msg"
 exit 0

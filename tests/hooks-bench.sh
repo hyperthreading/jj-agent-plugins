@@ -11,6 +11,7 @@
 #   post+git       PostToolUse after a command where git rewrote one file (per-path check runs)
 #   post(edit)     PostToolUse after an Edit/Write: snapshot only, the per-step cost before 0.3.0
 set -u
+export JJ_AGENT_SNAPSHOTS=1 JJ_AGENT_DETECT=1 JJ_AGENT_ADOPT_WORKTREES=1
 
 here=$(cd "$(dirname "$0")" && pwd -P)
 P=$(cd "${1:-$here/../plugins/jj-agent/scripts}" && pwd -P) || exit 2

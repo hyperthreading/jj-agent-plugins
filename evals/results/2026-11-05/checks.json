@@ -1,0 +1,48 @@
+{
+  "date": "2026-11-05",
+  "shared_check": {
+    "command": "bash scripts/isolated.sh bash scripts/check.sh",
+    "exit": 0,
+    "state_cases": 7,
+    "guidance_tests": 13,
+    "grader_tests": 10,
+    "client_control_tests": 29,
+    "hook_checks": 104
+  },
+  "syntax": {
+    "python_evals": "pass",
+    "typescript_observer": "strict SDK typecheck and bun transpile pass (@opencode/plugin 2.2.5)"
+  },
+  "source_consistency": {
+    "pinned_revision": "0d46dd937a3fdb4d3959ed8d6bcbcab233ac5e9f",
+    "source_files": 13,
+    "distribution_files": 15,
+    "result": "pass",
+    "scope": "runtime-source bytes at pinned commit and generated compass bytes; evaluation/docs changes excluded"
+  },
+  "evidence_integrity": {
+    "manifest_files": 1208,
+    "ledger_matches_export": true,
+    "request_costs_recomputed": true,
+    "frozen_schedule_matches": true
+  },
+  "logs": {
+    "shared-check.log": {
+      "path": "/private/var/folders/lv/q99glyrj5cngjzkp005_4j1h0000gn/T/opencode/jj-guidance-final.bd2acmv3/shared-check.log",
+      "sha256": "d0d6cd5a2eaa8e97602a6a09d9c5acf54e76174a1d7d29c0116e08471a1f9fa7"
+    },
+    "source-consistency.json": {
+      "path": "/private/var/folders/lv/q99glyrj5cngjzkp005_4j1h0000gn/T/opencode/jj-guidance-final.bd2acmv3/source-consistency.json",
+      "sha256": "e1be485b79ba11b8c78743b1a3b70aab68a06d968a25ace4ccd5d11dbbb25b55"
+    },
+    "observer-build.log": {
+      "path": "/private/var/folders/lv/q99glyrj5cngjzkp005_4j1h0000gn/T/opencode/jj-guidance-final.bd2acmv3/observer-build.log",
+      "sha256": "9edf979b0dc077ec58cdddf0794b664222977eba749b4014d4a3f4bc6a246bec"
+    },
+    "observer-typecheck.log": {
+      "path": "/private/var/folders/lv/q99glyrj5cngjzkp005_4j1h0000gn/T/opencode/jj-guidance-final.bd2acmv3/observer-typecheck.log",
+      "sha256": "1e28ac217e8bef50ddc2e6e7ae809e5c56257ba77bd677051945f5d99ec972d4"
+    }
+  },
+  "documentation_links": "pass"
+}

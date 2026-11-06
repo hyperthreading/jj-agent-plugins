@@ -1,0 +1,8 @@
+Where the jj working copy was at the latest user message or context reset. It is not refreshed after every tool call; run `jj st` or `jj log` for the current state.
+Repository: <ROOT> (jj, colocated with Git).
+Workspace: default
+@ (working copy): <WC> (no description) (empty), no file changes
+@- (parent): <PARENT> "megamerge" (empty)
+Mega merge: @- (<PARENT>) merges left, right. Keep editing in @ and move edits into those branches; load the jj-workflow skill for how.
+Nearest bookmark: left (2 changes below @), right (2 changes below @)
+trunk(): main; @ is 4 ahead, 0 behind

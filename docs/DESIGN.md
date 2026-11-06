@@ -1,6 +1,6 @@
 # jj-agent 설계
 
-coding agent(Claude Code, Codex, Muse Code)가 jj repo에서는 git 대신 jj를 쓰게 한다. 그래도 git이 repo를 바꾸면 그 사실과 복구 지점을 agent에게 알린다. `.jj`가 없는 곳에서는 아무것도 하지 않는다.
+coding agent(Claude Code, Codex, Muse Code)가 jj repo에서는 git 대신 jj를 쓰게 한다. 기본은 짧은 preamble, prompt/reset의 `jj-state`, 명령·작업 전략 skill 두 개다. Muse의 L1 상태 전달은 아직 끈다. tool snapshot, Git 차단·감지와 worktree 전환은 별도 opt-in이다. `.jj`가 없는 곳에서는 jj 지침을 넣지 않는다.
 
 이 문서는 전체 구조와 결정의 요약이다. 결정의 근거와 측정은 ADR과 `BENCHMARK.md`에 있다.
 
@@ -10,26 +10,30 @@ coding agent(Claude Code, Codex, Muse Code)가 jj repo에서는 git 대신 jj를
 | [ADR 0002](adr/0002-muse-code-support.md) | Muse Code 지원과 알림 전달 방식, 그 실험 |
 | [ADR 0003](adr/0003-detector-fixes.md) | 감지 보완(gitdir 파일, 긴 op log)과 가져오지 않은 제안 |
 | [ADR 0004](adr/0004-step-names-in-snapshots.md) | snapshot에 task와 step 이름 남기기, Codex 명령 접두어 실험 |
-| [ADR 0005](adr/0005-safe-worktree-adoption.md) | 작업 파일을 이동하지 않는 Git worktree 자동 초기화와 동시 실행·실패 처리 |
+| [ADR 0005](adr/0005-budgeted-guidance-validation.md) | 예산 제한 client 캠페인의 보존 조건 중단과 미완료 수용 기준 |
+| [ADR 0006](adr/0006-intent-aware-task-placement.md) | 작업 의도에 따른 기반 선택과 버전별 보존 판정 |
 | [BENCHMARK.md](../BENCHMARK.md) | hook 지연, 단계별 비용, 측정 환경 |
 
 ## 원칙
 
-- **jj repo에서만 동작한다.** 각 hook은 `.jj`를 찾아 디렉터리를 거슬러 올라가는 것으로 시작한다. 없으면 jj 프로세스를 띄우지 않고 바로 끝난다. repo를 `jj git init`으로 바꾸는 순간부터 동작한다. 세션 중간이어도 같다. 본체 repo가 jj repo인 `git worktree`는 cwd 또는 tool file path로 직접 접근할 때 본체 jj 저장소의 workspace로 연결한다. 빈 `root()` workspace의 새 `.jj` metadata만 옮기며 작업 파일은 제자리에 둔다. Git 객체·ref와 jj metadata·op log는 공유한다. 다른 worktree를 일괄 탐색·전환하지 않는다. `.git` 파일에서는 부모로 올라가지 않으므로 일반 Git worktree와 submodule은 경계로 남는다(ADR 0005).
+- **jj repo에서만 동작한다.** `.jj`를 찾아 디렉터리를 거슬러 올라간다. 없으면 jj 프로세스 없이 끝난다. 세션 중간에 jj repo가 되어도 다음 prompt/tool에서 발견한다. `JJ_AGENT_ADOPT_WORKTREES=1`일 때만 jj repo의 Git worktree를 같은 자리에서 colocated jj workspace로 바꾼다. 일반 Git worktree는 건드리지 않는다.
 - **jj를 쓰게 하는 것은 skill이다.** 차단과 감지는 그 뒤를 받친다. agent가 skill을 잘 따른다면 hook 없이 skill만 담은 `plugins/jj-skill`을 대신 설치할 수 있다. skill 파일은 두 plugin에 같은 내용으로 복사해 두고 `tests/skill-sync-test.sh`로 확인한다. symlink는 plugin cache 복사, APM, Windows checkout에서의 동작을 보장할 수 없어서 쓰지 않는다.
 - **명령을 고쳐 쓰지 않는다.** 명령 문자열을 분석해서 막지 않고, 명령 전후의 실제 상태를 비교한다. 그래야 스크립트 안의 git도 잡히고, agent의 승인 규칙이나 화면 표시에 영향을 주지 않는다.
 - **stable component를 조합한다.** jj의 public 명령(`op log`, `diff`, `util snapshot`, `at_operation()`), git의 public 명령(`ls-files --debug`), 각 agent의 public hook protocol만 쓴다. 상태 저장소나 daemon을 새로 만들지 않는다.
-- **hook은 Bash 호출마다 돈다.** 그래서 bash 내장 기능으로 입력을 파싱하고, 보통 경로의 jj 프로세스는 hook당 하나만 띄운다. worktree 초기화·중단 복구 및 SessionStart의 소유 workspace 정리는 Python 3와 추가 Git/jj 호출을 쓰는 예외다. 변경 없는 초기화 거절은 Python metadata 검사만 수행한다(ADR 0005). 목표는 Bash 호출 1회에 100ms 미만이다.
+- **tool 경로의 비용을 제한한다.** bash 내장 기능으로 입력을 파싱한다. 기본 PreToolUse는 즉시 끝나며, PostToolUse는 새 repo 진입이 아니면 snapshot이나 상태 읽기를 하지 않는다. opt-in 감지는 기존 hook당 jj 1회 구조를 유지한다. L1은 prompt/reset에서 snapshot 1회와 읽기 4회를 실행하므로 이 제한의 예외다. 전체 hook 비용은 `tests/guidance-bench.py`로 따로 잰다.
 
 ## 구성 요소
 
 ```
 plugins/jj-agent/
 ├── skills/jj/SKILL.md      # jj 작업 절차, 의도→명령 표, 충돌·push 절차, --help fallback
+├── skills/jj-workflow/SKILL.md # mega merge, 병렬 작업, workspace
 ├── hooks/hooks.json        # 아래 hook 5개
 └── scripts/
-    ├── adopt-worktree.py   # 첫 접근 시에만: OS 잠금, jj 공개 초기화 명령, 중단 상태
     ├── lib.sh              # 공용 함수 (입력 파싱, repo 탐색, worktree 전환, 감지, Muse 보류 상태)
+    ├── options.sh          # 기본값과 detection → snapshots 의존성
+    ├── state.sh            # bash 상태 renderer와 세션별 중복 억제
+    ├── shared/preamble.md  # 원본에서 생성한 배포용 문구
     ├── session-start.sh    # SessionStart
     ├── user-prompt.sh      # UserPromptSubmit
     ├── pre-tool.sh         # PreToolUse (Bash|Edit|Write|MultiEdit|NotebookEdit)
@@ -40,25 +44,33 @@ plugins/jj-agent/
 | 요소 | 하는 일 |
 |---|---|
 | skill `jj` | 모든 버전 관리 작업을 jj로 한다. jj 0.46 기준이며, 명령이 실패하면 `--help`로 확인하는 절차가 있다 |
-| git shim | Claude Code에서 SessionStart가 `CLAUDE_ENV_FILE`로 PATH 맨 앞에 넣는다. jj repo 안에서 상태를 바꾸는 git(commit, checkout, reset, stash 등)을 막고 jj 명령을 안내한다. 읽기 전용 git과 jj가 내부에서 부르는 git은 통과시킨다. `JJ_SHIM_OFF=1`이면 그대로 git을 부른다 |
-| SessionStart | shim을 PATH에 넣는다(Claude Code). 세션이 jj repo(또는 jj repo의 git worktree)에서 시작하면 그 사실을 알린다. 오래된 상태 파일을 지운다 |
-| UserPromptSubmit | snapshot한다. 사용자가 turn 사이에 바꾼 것을 agent가 움직이기 전에 기록해 둔다. turn 사이에 jj repo가 된 곳이나 현재 접근한 Git worktree의 초기화도 여기서 알린다 |
-| PreToolUse | Bash 명령 전에 baseline(마지막 op id와 git index 사본)을 남긴다. Muse에서는 보류된 알림이 있으면 이 호출을 한 번 막는다 |
-| PostToolUse, PostToolUseFailure | 매 편집과 명령 뒤에 snapshot해서 각 단계가 `jj op log`에 남게 한다. snapshot op에는 그 단계의 이름(`jj-agent.step`)이 붙는다. Bash 명령 뒤에는 git 변경을 판정해 알린다. worktree 생성에 따른 ref 변경도 숨기지 않는다 |
+| git shim | `JJ_AGENT_GUARD=1`일 때 Claude Code의 `CLAUDE_ENV_FILE`로 PATH에 넣는다. jj 내부 Git과 script의 읽기 전용 Git은 허용하며, mutating Git은 막는다. agent가 직접 쓰는 읽기 명령도 jj를 쓰라는 지침은 별개다 |
+| SessionStart | preamble과 현재 상태를 재전달한다. 마지막 상태를 무효화하여 clear·resume·compact 뒤에도 전달한다. 오래된 상태 파일을 지운다 |
+| UserPromptSubmit | 상태가 켜졌거나 tool snapshot이 켜졌으면 snapshot한다. L1은 그 뒤 읽어 바뀐 경우만 보낸다. 첫 jj 진입이면 preamble도 보낸다 |
+| PreToolUse | 감지가 켜졌을 때만 baseline을 기록하고 Muse 보류 알림을 처리한다 |
+| PostToolUse, PostToolUseFailure | 첫 jj 진입을 알린다. tool snapshot, 감지, worktree 전환은 각 옵션이 켜졌을 때 수행한다 |
+
+설정명과 기본값은 [plugin README](../plugins/jj-agent/README.md#options-and-migration)에 있다. 지침은 `JJ_AGENT_PREAMBLE`, `JJ_AGENT_STATE`로 독립 설정한다. `JJ_AGENT_DETECT=1`은 복구 baseline을 위해 `JJ_AGENT_SNAPSHOTS=1`을 강제한다. guard나 worktree 전환은 함께 켜지지 않는다.
+
+공통 원본은 `shared/`와 `plugins/jj-skill/skills/`다. `scripts/sync-shared.sh`가 기본 task loop, hook preamble과 jj-agent의 두 skill을 생성한다. hook은 설치된 파일만 읽는다. 상태 형식과 공통 fixture는 [shared/jj-state.md](../shared/jj-state.md)에 있다. OpenCode compass가 같은 원본을 복사하고 source revision을 고정한다.
+
+task loop는 [작업 관계](../GLOSSARY.md)에 따라 기반을 고른다. 이어 하기는 기존 change, 독립 작업은 요청한 기반이나 main/trunk, 의존 작업은 필요한 change 위에서 시작한다. 빈 `@`도 기반과 자식 여부를 확인한 뒤 재사용한다. 작업 보존은 보호 change와 bookmark를 기준으로 판단하며, workspace 자체의 유지는 별도 요청 조건이다.
 
 ## agent별 동작
 
 | | Claude Code | Codex | Muse Code |
 |---|---|---|---|
 | 설치 | plugin marketplace, 또는 APM | plugin marketplace(같은 파일을 읽음), 또는 APM | plugin marketplace + `muse plugins approve` |
-| git 예방 | shim | 없음(hook이 PATH를 바꿀 수 없음) | 없음(같은 이유) |
-| 사후 감지 | 있음(shim의 backstop) | 있음 | 있음 |
+| git 예방 | opt-in shim | 없음(hook이 PATH를 바꿀 수 없음) | 없음(같은 이유) |
+| 사후 감지 | opt-in(shim의 backstop) | opt-in | opt-in |
 | 실패한 명령 | PostToolUseFailure로 감지 | PostToolUse로 감지(실패해도 PostToolUse가 옴) | PostToolUseFailure로 감지 |
 | 알림 전달 | `additionalContext` (tool 결과 바로 뒤에 붙음) | `additionalContext` | tool 결과 안. 아래 "Muse Code의 알림 전달" |
 
 APM으로 설치할 수 있는 target은 `claude`, `codex`로 제한한다. 다른 target에는 matcher와 입출력이 맞지 않는 hook이 조용히 설치되기 때문이다(ADR 0001).
 
 ## Bash 호출 1회의 흐름
+
+아래는 `JJ_AGENT_DETECT=1`인 경우다. 기본 설정에서는 이 감지 경로를 실행하지 않는다.
 
 1. **PreToolUse:** `jj op log --ignore-working-copy -n1`로 마지막 op id를 읽고, git index를 copy-on-write로 복제한다(`cp -c`, `--reflink=auto`). 둘을 `tool_use_id`별 baseline 파일로 남긴다. snapshot은 하지 않는다. 직전 PostToolUse와 이번 turn의 UserPromptSubmit이 이미 했기 때문이다.
 2. **명령 실행.**
@@ -68,13 +80,13 @@ APM으로 설치할 수 있는 target은 `claude`, `codex`로 제한한다. 다�
    3. 아래 두 신호로 판정한다.
    4. 알림을 만들어 agent별 경로로 전달한다. baseline 파일은 지운다.
 
-Edit·Write 뒤의 PostToolUse는 snapshot만 한다. 이때도 step 이름을 붙인다.
+`JJ_AGENT_SNAPSHOTS=1`이면 Edit·Write 뒤에도 step 이름을 붙여 snapshot한다.
 
 ## task와 step 이름
 
 자세한 내용은 ADR 0004에 있다.
 
-- **task:** agent가 일을 시작할 때 `jj describe -m`(`@`가 비었을 때)이나 `jj new -m`으로 `@`에 붙인다. skill의 task loop에 있다.
+- **task:** 기존 작업은 해당 change에서 이어 한다. 새 작업은 의도한 기반에서 `jj new <base> -m`으로 이름을 붙인다. 그 기반 위에 자식 없는 빈 `@`가 있으면 `jj describe -m`으로 재사용한다. skill의 task loop에 있다.
 - **step:** hook이 snapshot하는 jj 명령 끝에 `--config 'jj-agent.step=<step>'`을 붙인다. jj는 명령 인자를 op의 `args`로 남긴다. Bash는 Claude Code Bash 도구의 `description`, 없으면 명령 첫 줄을 쓴다. 파일 도구는 도구 이름과 경로, Codex patch는 patch가 건드린 파일을 쓴다. 첫 줄만, 최대 100바이트이고 문자 경계에서 자른다. jj가 인자를 거부하면 태그 없이 다시 snapshot한다.
 - `jj op log`의 `args:` 줄에 보인다. change 하나의 단계별 기록은 `jj evolog -r <id> -T 'operation.description() ++ "  " ++ operation.attributes() ++ "\n"'`로 본다.
 
@@ -133,12 +145,9 @@ Muse는 hook의 `additionalContext`를 요청 맨 앞의 developer 메시지에 
 | 경로 | 내용 | 정리 |
 |---|---|---|
 | `sessions/<session_id>` | 이 세션에서 이미 알린 jj repo 목록 | SessionStart가 비우고, 14일 지난 파일을 지운다 |
-| `baselines/<tool_use_id>`, `.index`, `.post`, `.notice` | Bash 명령 1회의 baseline op와 index 사본, Muse 초기화 안내 | PostToolUse가 지운다. 남은 것(중단, 거부)은 하루 뒤 SessionStart가 지운다 |
+| `sessions/<session_id>.state` | 마지막 L1 본문. workspace 경로 포함 | SessionStart가 지우고, prompt마다 비교한다 |
+| `baselines/<tool_use_id>`, `.index`, `.post` | Bash 명령 1회의 baseline op와 index 사본 | PostToolUse가 지운다. 남은 것(중단, 거부)은 하루 뒤 SessionStart가 지운다 |
 | `pending/<session_id>` | Muse에서 보류한 알림. 1행은 `delivered`나 `undelivered`, 그 뒤는 명령이나 알림 본문 | 다음 상태 변경 호출이 지운다. 하루 지난 것은 SessionStart가 지운다 |
-| `adoptions/<physical-worktree-path>/pending`, `last-error` | 대상 worktree/admin 식별 정보를 포함한 초기화 중단 기록과 오류 | 성공하면 pending을 지운다. 경로가 재사용되면 이전 기록을 적용하지 않는다. 불완전 metadata의 오류는 검토를 위해 남긴다 |
-| `adoptions/<physical-worktree-path>/refused-<session-hash>` | 거절 사유와 index/HEAD/ref/config/등록/부모 경로 signature | signature가 바뀌면 재검사하고, 같은 거절 사유는 재안내하지 않는다 |
-| `managed-workspaces/<repo-hash>/<name>.json` | 완료한 plugin workspace의 실제 Git 경로와 식별 정보 | SessionStart가 checkout과 Git admin이 모두 제거된 workspace만 forget한다 |
-| `adoption-locks/<git-admin-path-hash>` | worktree 초기화 OS 잠금의 inode | 파일은 유지하고 잠금은 프로세스 종료 시 해제한다 |
 
 ## 성능
 
@@ -167,7 +176,7 @@ Muse는 hook의 `additionalContext`를 요청 맨 앞의 developer 메시지에 
 | 명령을 고쳐 쓰기(wrapper로 감싸기) | 승인 규칙과 화면 표시에 영향을 준다 | ADR 0001 |
 | 명령 직전에도 snapshot | 30,000 파일에서 hook당 약 36ms. turn 사이의 변경은 UserPromptSubmit이 잡는다 | ADR 0001, 0003 |
 | hook을 Python으로 다시 쓰기, matcher `*` | 같은 조건에서 Bash 호출이 약 2배, 다른 tool마다 약 60ms 추가 | ADR 0003 |
-| shim을 기본으로 통과시키기 | Claude Code의 예방 수단을 없앤다. 이번 범위가 아니다 | ADR 0003 |
+| shim을 기본으로 통과시키기 (이전 결정) | ADR 0003 당시에는 제외했다. 공통 지침 기본형에서는 guard를 opt-in으로 바꿨으며, 켠 경우의 차단·복구 검사를 유지한다 | ADR 0003, plugin README의 migration |
 | Muse에서 `additionalContext`나 Stop hook으로 알리기 | 모델이 놓치거나 세션 전 일로 해석했다 | ADR 0002 |
 | Muse에서 정해진 점검 명령이 끝날 때까지 모든 tool 보류 | 순서를 지키는 데 필요한 것보다 크다. 1회 보류로 실측 6/6 | ADR 0002 |
 | Gemini, Copilot, Cursor 지원 | hook 입출력이 맞지 않는다. 필요해지면 별도 package로 만든다 | ADR 0001 |
@@ -175,6 +184,11 @@ Muse는 hook의 `additionalContext`를 요청 맨 앞의 developer 메시지에 
 | Codex에서 명령 앞에 이유 붙이기(`# ...`, `echo ...;`) | 주석은 `forbidden` 규칙을 끄고, 둘 다 sandbox 밖 실행에서 허용된 명령도 다시 묻게 한다 | ADR 0004 |
 
 ## 테스트와 측정
+
+- `tests/guidance-test.py`: 원본 checkout 없이 설치 파일만으로 preamble/state, 기본값, 독립 옵션, session/reset/workspace, snapshot 오류를 확인한다.
+- `tests/state-test.py`: compass와 공유하는 실제 jj 상태 fixture의 기대 출력을 검사한다.
+- `tests/skill-sync-test.sh`: 두 skill 배포물, task loop, preamble 생성 결과를 비교한다.
+- `evals/fixtures/grader/test.py`: 독립·계속·의존 작업의 배치, 보호 change/bookmark의 무단 수정, import op 없는 script 내부 Git 유실, 관측 누락을 구별한다. 계약 1의 과거 판정도 유지한다. 실제 client 캠페인은 중단 상태이며 후속 실행과 pilot에는 새 승인이 필요하다.
 
 - `tests/hooks-test.sh`: 실제 jj repo에서 hook을 Claude Code·Codex·Muse 형식의 입력으로 부르는 시나리오 테스트다. 전체 PATH와 jq·shim이 없는 최소 PATH에서 각각 돈다. 다음을 확인한다.
   - git 변경 판정

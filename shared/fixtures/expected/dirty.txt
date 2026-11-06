@@ -1,0 +1,8 @@
+Where the jj working copy was at the latest user message or context reset. It is not refreshed after every tool call; run `jj st` or `jj log` for the current state.
+Repository: <ROOT> (jj, colocated with Git).
+Workspace: default
+@ (working copy): <WC> "user draft", 1 file changed
+  M user.txt
+@- (parent): <PARENT> "base" [main] (immutable)
+Nearest bookmark: main (1 change below @)
+trunk(): main; @ is 1 ahead, 0 behind

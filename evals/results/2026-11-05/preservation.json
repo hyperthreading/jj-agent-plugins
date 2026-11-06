@@ -1,0 +1,27 @@
+{
+  "run": "smoke-claude-multi-turn-external-default-02",
+  "grade": {
+    "result": "unknown",
+    "failures": [
+      "client/driver exited unsuccessfully",
+      "user file lost or modified"
+    ],
+    "unknown": [
+      "command, trace inheritance or isolation coverage not verified",
+      "execution did not finish, or background work remains"
+    ]
+  },
+  "last_bash_command": "jj new main -m \"Add feature.txt\" && printf 'feature ready\\n' > feature.txt && jj commit -m \"Add feature.txt\" && jj log -r 'all()' --limit 6",
+  "baseline_user_file": "external user work\n",
+  "workspace_user_file": "base\n",
+  "protected_change": "kutnwvuzmwsukvywynmkzymnqrnrlnzr",
+  "protected_fields_match": {
+    "tree": true,
+    "description": true,
+    "parent_changes": true
+  },
+  "bookmark_matches": true,
+  "user_wip_file_stripped": "external user work",
+  "latest_delivered_state": "Where the jj working copy was at the latest user message or context reset. It is not refreshed after every tool call; run `jj st` or `jj log` for the current state.\nRepository: /Users/jun/workspace/jj-guidance-campaign-20261105/smoke-claude-multi-turn-external-default-02/repo (jj, colocated with Git).\nWorkspace: default\n@ (working copy): kutnwvuz \"external user draft\" [user-wip], 1 file changed\n  M user.txt\n@- (parent): krotlnrq \"base\" [main]\nNearest bookmark: user-wip (on @)",
+  "interpretation": "Current-workspace content condition failed after branching from main; protected user history remains intact. Interrupted run stays unknown with observed failures."
+}

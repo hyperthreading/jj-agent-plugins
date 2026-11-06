@@ -7,13 +7,12 @@
 . "${BASH_SOURCE%/*}/lib.sh"
 read_input
 json_get cwd cwd; cwd=${cwd:-$PWD}
-find_jj_root "$cwd" || {
-  [ -n "$ADOPTION_CONTEXT" ] && emit_context UserPromptSubmit "$ADOPTION_CONTEXT"
-  exit 0
-}
+find_jj_root "$cwd" || exit 0
 json_get session_id SESSION_ID
 scan_dirs "$cwd"
 step_args 'changes made between turns'
-command -v jj >/dev/null 2>&1 && snapshot "$JJ_ROOT"
+adopt_new_worktrees "$JJ_ROOT"
+if [ "$JJ_AGENT_STATE" = 1 ] || [ "$JJ_AGENT_SNAPSHOTS" = 1 ]; then snapshot "$JJ_ROOT"; fi
+append_state "$JJ_ROOT"
 [ -n "$NEW_CONTEXT" ] && emit_context UserPromptSubmit "$NEW_CONTEXT"
 exit 0
